@@ -29,9 +29,9 @@ public enum ApplyStatus
 public sealed record ApplyResult(ApplyStatus Status, ComposeState? After, bool ClipboardRestored = true);
 
 /// <summary>
-/// 온톡 작성 창의 본문을 초안으로 바꾼다. 값을 직접 써넣지 않고 사용자가 하듯 클릭하고 붙여넣는다.
-/// 값을 직접 써넣으면 화면에는 보이지만 온톡 내부 상태가 바뀌지 않아 빈 쪽지가 나갈 수 있다.
-/// 보내는 입력은 입력창 클릭, Ctrl+A, Ctrl+V, Delete뿐이다. 전송은 하지 않는다.
+/// 온톡 작성 창의 본문을 초안으로 바꾼다. 어느 방식으로 넣든 넣은 뒤 본문과 온톡의 바이트 표시를 다시 읽어
+/// 초안과 같은지 확인한다. 바이트 표시는 온톡 내부 상태에서 나오므로, 화면에만 글자가 보이고 내부 상태는
+/// 바뀌지 않은 경우를 걸러낸다. 전송은 하지 않는다.
 /// </summary>
 public static class ComposeWriter
 {
@@ -73,6 +73,16 @@ public static class ComposeWriter
             return new ApplyResult(ApplyStatus.TooLong, before);
         }
 
+        // 먼저 접근성 기능으로 값을 넣는다. 창을 앞으로 가져오지 않고 키보드·마우스·클립보드도 쓰지 않아
+        // 사용자가 치던 글자가 온톡 창으로 들어갈 일이 없다. 넣은 뒤 본문과 바이트 표시를 다시 읽어 확인하고,
+        // 확인되지 않을 때만 클릭해 붙여넣는 방식으로 넘어간다.
+        if (Win32.FindRenderChild(hwnd) is { } render && MsaaReader.ReadTree(render) is { } tree &&
+            tree.DescendantsAndSelf().FirstOrDefault(n => n.Role == AccNode.EditableText && n.Name.Length > 0) is { } field &&
+            MsaaReader.SetValue(render, field, body) &&
+            Verify(hwnd, body, typed: true, clipboardRestored: true, attempts: 6) is { Status: ApplyStatus.Applied } quiet)
+        {
+            return quiet;
+        }
         switch (InputInjector.FocusByClick(hwnd, before.BodyBounds))
         {
             case FocusOutcome.ModifierDown:
@@ -91,14 +101,14 @@ public static class ComposeWriter
     }
 
     // 붙여넣기가 화면에 반영될 때까지 잠깐 기다리며 다시 읽는다.
-    private static ApplyResult Verify(IntPtr hwnd, string body, bool typed, bool clipboardRestored)
+    private static ApplyResult Verify(IntPtr hwnd, string body, bool typed, bool clipboardRestored, int attempts = 10)
     {
         if (!typed)
         {
             return new ApplyResult(ApplyStatus.FocusFailed, Read(hwnd), clipboardRestored);
         }
         ComposeState? after = null;
-        for (var attempt = 0; attempt < 10; attempt++)
+        for (var attempt = 0; attempt < attempts; attempt++)
         {
             Thread.Sleep(200);
             after = Read(hwnd);

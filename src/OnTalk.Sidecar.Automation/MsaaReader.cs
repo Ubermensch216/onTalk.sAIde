@@ -36,7 +36,17 @@ internal static class MsaaReader
     /// 앞서 읽은 요소를 다시 찾아 기본 동작(웹 요소의 클릭)을 실행한다. 좌표가 아니라 요소 자체를 지정하므로
     /// 다른 창이나 다른 요소가 눌리지 않는다. 그 사이 화면이 바뀌어 같은 자리의 요소가 달라졌으면 실행하지 않는다.
     /// </summary>
-    public static bool Invoke(IntPtr renderHwnd, AccNode expected)
+    public static bool Invoke(IntPtr renderHwnd, AccNode expected) =>
+        Act(renderHwnd, expected, acc => acc.accDoDefaultAction(Self));
+
+    /// <summary>
+    /// 입력창의 값을 접근성 기능으로 바꾼다. 창을 앞으로 가져오지 않고 키보드·마우스·클립보드도 쓰지 않는다.
+    /// 화면에 글자가 보여도 온톡 내부 상태가 바뀌었다는 보장은 없으므로, 부르는 쪽이 바이트 표시 등으로 다시 확인해야 한다.
+    /// </summary>
+    public static bool SetValue(IntPtr renderHwnd, AccNode expected, string value) =>
+        Act(renderHwnd, expected, acc => acc.set_accValue(Self, value));
+
+    private static bool Act(IntPtr renderHwnd, AccNode expected, Action<IAccessible> action)
     {
         if (Root(renderHwnd) is not { } acc)
         {
@@ -64,7 +74,7 @@ internal static class MsaaReader
         }
         try
         {
-            acc.accDoDefaultAction(Self);
+            action(acc);
             return true;
         }
         catch

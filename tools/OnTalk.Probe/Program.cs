@@ -25,6 +25,8 @@ using OnTalk.Sidecar.Storage;
 //   people --hwnd 0x.. --name 이름   받는 사람 추가 창에서 검색만 한다 (선택·전송 없음)
 //   group --hwnd 0x.. --name 이름 --title 직급   그 사람 한 명짜리 그룹을 수신자로 넣는 흐름 시험 (전송 없음)
 //   backupcheck                     실제 보관 자료를 백업해 임시 폴더에 되살려 보고 건수를 비교한다 (원본은 건드리지 않음)
+//   prepare --hwnd 0x.. --text T --at "yyyy-MM-dd HH:mm"   본문과 예약을 넣어 전송 직전 상태로 만든다 (전송 없음)
+//   setvalue --hwnd 0x.. --path P --text T   접근성 기능으로 입력창 값을 바꾸는 실험 (창을 앞으로 가져오지 않음)
 //   input --hwnd 0x..               빈 새 쪽지 창에 붙여넣기 시험 (사용자 허락 후에만 실행)
 // input 명령을 빼면 입력·클릭 등 온톡을 조작하는 동작은 하지 않는다.
 //
@@ -56,6 +58,21 @@ if (command == "soak")
     }
     return 0;
 }
+if (command == "prepare")
+{
+    var compose = new IntPtr(Convert.ToInt64(hwndArg!, 16));
+    var applied = ComposeWriter.ApplyBody(compose, Option("--text")!, "");
+    Console.WriteLine($"본문 반영: {applied.Status}, 클립보드 복원={applied.ClipboardRestored}");
+    if (applied.Status != ApplyStatus.Applied)
+    {
+        return 4;
+    }
+    var set = ComposeActions.SetReservation(compose, DateTime.Parse(Option("--at")!));
+    var state = ComposeWriter.Read(compose);
+    Console.WriteLine($"예약 설정: {set}");
+    Console.WriteLine($"전송 직전 상태: 수신 [{string.Join(", ", state?.Recipients ?? [])}], {state?.UsedBytes}/{state?.LimitBytes} Bytes, 예약 {state?.Reservation:yyyy-MM-dd HH:mm}, SMS={state?.SmsChecked}, 대화상자={state?.DialogOpen}");
+    return 0;
+}
 if (command == "reserve")
 {
     var compose = new IntPtr(Convert.ToInt64(hwndArg!, 16));
@@ -66,6 +83,16 @@ if (command == "reserve")
     var cancel = ComposeActions.CancelReservation(compose);
     var after = ComposeWriter.Read(compose);
     Console.WriteLine($"취소: {cancel}, 예약 남음={after?.Reservation is not null}, 대화상자={after?.DialogOpen}");
+    return 0;
+}
+if (command == "dispatches")
+{
+    // 발송 기록의 상태만 본다. 본문과 수신자는 출력하지 않는다.
+    using var store = ProfileStore.Open(ProfileStore.DefaultRoot, OnTalkAccount.DetectCandidate()!);
+    foreach (var d in store.GetDispatches(5))
+    {
+        Console.WriteLine($"{d.CreatedAt.ToLocalTime():MM-dd HH:mm:ss}  예약={d.ReserveAt:MM-dd HH:mm}  {d.Status}  수신 {d.RecipientNames.Count}명, {NoteBytes.Count(d.Body)} Bytes {d.Detail}");
+    }
     return 0;
 }
 if (command == "backupcheck")
@@ -133,6 +160,25 @@ if (command == "people")
         Console.WriteLine($"   직급 {row.Title.Length}자, 세부 {row.Details.Count}칸");
     }
     Console.WriteLine($"서로 구분됨: {found.Rows.Select(r => (r.Title, string.Join("|", r.Details))).Distinct().Count() == found.Rows.Count}");
+    return 0;
+}
+if (command == "setvalue")
+{
+    var target = new IntPtr(Convert.ToInt64(hwndArg!, 16));
+    var render = Win32.FindRenderChild(target) ?? IntPtr.Zero;
+    var node = MsaaReader.ReadTree(render)?.DescendantsAndSelf().FirstOrDefault(n => n.Path == Option("--path"));
+    if (node is null || node.Role != AccNode.EditableText)
+    {
+        Console.WriteLine("그 경로에 입력창이 없습니다.");
+        return 1;
+    }
+    var text = (Option("--text") ?? "").Replace("\\n", "\n");
+    Console.WriteLine($"값 설정 호출: {MsaaReader.SetValue(render, node, text)}");
+    Thread.Sleep(700);
+    var state = ComposeWriter.Read(target);
+    Console.WriteLine(state is null
+        ? "작성 창 상태를 읽지 못함"
+        : $"다시 읽음: 본문 일치={state.Body == text}, 표시 {state.UsedBytes}/{state.LimitBytes} (계산 {NoteBytes.Count(text)})");
     return 0;
 }
 if (command == "paste")

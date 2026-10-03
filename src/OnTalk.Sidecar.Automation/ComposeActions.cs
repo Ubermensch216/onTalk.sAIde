@@ -68,14 +68,32 @@ public static class ComposeActions
         {
             return new SearchOutcome(ActionStatus.UiNotFound, search, []);
         }
-        if (InputInjector.FocusByClick(search, box.Bounds) != FocusOutcome.Focused ||
-            !InputInjector.ReplaceText(search, name).Typed || !InputInjector.Tap(search, InputInjector.KeyEnter))
+        if (!SearchQuietly(search, box, name) &&
+            (InputInjector.FocusByClick(search, box.Bounds) != FocusOutcome.Focused ||
+             !InputInjector.ReplaceText(search, name).Typed || !InputInjector.Tap(search, InputInjector.KeyEnter)))
         {
             return new SearchOutcome(ActionStatus.InputBlocked, search, []);
         }
         // 검색 전 목록(친구 목록 등)이 남아 있을 수 있어, 검색어를 이름으로 가진 행이 나올 때까지 기다린다.
         var rows = Until(() => Tree(search) is { } t ? OnTalkPages.PersonRows(t) : [], r => r.Any(p => p.Name == name));
         return new SearchOutcome(ActionStatus.Ok, search, rows.Where(p => p.Name == name).ToList());
+    }
+
+    // 검색어를 접근성 기능으로 넣고 돋보기를 누른다. 창을 앞으로 가져오지 않고 키보드를 쓰지 않는다.
+    // 검색이 실제로 돌았는지는 결과 머리글("키워드 검색")로 확인한다.
+    private static bool SearchQuietly(IntPtr search, AccNode box, string name)
+    {
+        if (Win32.FindRenderChild(search) is not { } render || !MsaaReader.SetValue(render, box, name))
+        {
+            return false;
+        }
+        var typed = Until(() => Tree(search) is { } t ? OnTalkPages.SearchBox(t)?.Value : null, v => v == name);
+        if (typed != name || Tree(search)?.DescendantsAndSelf().FirstOrDefault(n => n.Name == "icon: search") is not { } icon ||
+            !Click(search, icon))
+        {
+            return false;
+        }
+        return Until(() => Tree(search)?.ContainsText("키워드 검색") == true, done => done);
     }
 
     /// <summary>검색 결과에서 한 사람을 골라 확인을 누르고, 작성 창 수신자에 그 이름이 늘었는지 확인한다.</summary>
