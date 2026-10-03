@@ -20,6 +20,7 @@ public sealed record NoteWindowContent(NoteWindowKind Kind, string Title, Receiv
 /// <param name="UsedBytes">온톡이 표시한 본문 바이트 수.</param>
 /// <param name="DialogOpen">예약 설정 같은 창 안 대화상자가 떠 있어 본문을 조작할 수 없는 상태.</param>
 /// <param name="BodyBounds">본문 입력창의 화면 위치.</param>
+/// <param name="Reservation">예약 전송이 걸려 있으면 그 시각(한국 시각). 즉시 전송이면 null.</param>
 public sealed record ComposeState(
     IReadOnlyList<string> Recipients,
     string Body,
@@ -27,7 +28,8 @@ public sealed record ComposeState(
     int LimitBytes,
     bool SmsChecked,
     bool DialogOpen,
-    AccBounds BodyBounds);
+    AccBounds BodyBounds,
+    DateTime? Reservation = null);
 
 /// <summary>
 /// 온톡 5.4.3 쪽지 창(windows/note/app.html)의 접근성 트리를 해석한다.
@@ -37,6 +39,8 @@ public static class NoteWindowParser
 {
     private const string ReceivedTitle = "받은 쪽지";
     private static readonly string[] ModeToggles = ["싱글창", "멀티창"];
+    // 수신자가 없을 때 이름 자리에 나오는 안내 문구.
+    private const string NoRecipientHint = "받는 사람을 추가해주세요.";
 
     public static bool IsNotePage(AccNode root) =>
         root.Role == AccNode.Document && root.Value.Contains("/windows/note/", StringComparison.OrdinalIgnoreCase);
@@ -73,7 +77,7 @@ public static class NoteWindowParser
         }
         // 수신자 이름은 수신 "추가" 단추와 본문 입력창 사이에 나온다.
         var recipients = nodes.Skip(addIndex + 1).Take(bodyIndex - addIndex - 1)
-            .Where(n => n.Role == AccNode.StaticText && n.Name.Trim().Length > 0)
+            .Where(n => n.Role == AccNode.StaticText && n.Name.Trim().Length > 0 && n.Name != NoRecipientHint)
             .Select(n => n.Name.Trim()).ToList();
         var body = nodes[bodyIndex];
         return new ComposeState(
@@ -83,7 +87,9 @@ public static class NoteWindowParser
             limit,
             nodes.Any(n => n.Role == AccNode.CheckBox && n.Name == "SMS 발송" && (n.State & AccNode.StateChecked) != 0),
             nodes.Any(n => n.Role == AccNode.StaticText && n.Name == "예약 전송 일시"),
-            body.Bounds);
+            body.Bounds,
+            nodes.Where(n => n.Role == AccNode.StaticText).Select(n => ReservationTime.ParseCompose(n.Name))
+                .FirstOrDefault(t => t is not null));
     }
 
     private static ReceivedNote? ParseReceived(AccNode root, DateTimeOffset now)

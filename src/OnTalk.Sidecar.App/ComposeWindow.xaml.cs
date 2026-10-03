@@ -30,6 +30,8 @@ public partial class ComposeWindow : Window
     private string _synced = "";
     private string _quote = "";
     private bool _busy;
+    private ComposeState? _state;
+    private string _conflictNote = "";
 
     public ComposeWindow(ProfileStore store, OllamaWriter writer, StoredNote? source)
     {
@@ -43,6 +45,7 @@ public partial class ComposeWindow : Window
             : $"답장 초안 · {source.Note.SenderName} ({source.Note.SentAt?.Value.ToString("yyyy-MM-dd") ?? source.Note.SentAtText})";
         Editor.Text = store.GetDraft(_slot) ?? "";
         ReloadTemplates();
+        InitializeDispatchControls();
         UpdateTargets([]);
         UpdateBytes();
         _autosave.Tick += (_, _) => SaveDraft();
@@ -72,7 +75,9 @@ public partial class ComposeWindow : Window
                 ? "열려 있는 온톡 작성 창이 없습니다. 온톡에서 새 쪽지 창을 열면 여기에 나타납니다."
                 : "열려 있는 온톡 작성 창이 없습니다. 온톡 받은 쪽지 창에서 답장을 누르면 여기에 나타납니다.";
         }
-        ApplyButton.IsEnabled = !_busy && _target != IntPtr.Zero;
+        _state = targets.FirstOrDefault(t => t.Hwnd == _target)?.State;
+        RefreshHint();
+        EnableControls();
     }
 
     private void OnTargetChanged(object sender, SelectionChangedEventArgs e)
@@ -82,8 +87,9 @@ public partial class ComposeWindow : Window
             return;
         }
         _target = target.Hwnd;
+        _state = target.State;
         Adopt(target.State, importMessage: Editor.Text.Length == 0);
-        ApplyButton.IsEnabled = !_busy;
+        EnableControls();
     }
 
     /// <summary>온톡 창의 현재 본문을 기준으로 삼는다. 온톡이 넣어 둔 원문 인용은 따로 보관한다.</summary>
@@ -98,11 +104,10 @@ public partial class ComposeWindow : Window
         {
             Editor.Text = message;
         }
-        var names = state.Recipients.Count > 0 ? string.Join(", ", state.Recipients) : "없음";
-        TargetHint.Text = $"수신: {names}" + (state.SmsChecked ? " · SMS 발송 선택됨" : "") +
-                          (message.Length > 0 && !importMessage && message != Editor.Text
-                              ? " · 온톡 창에 이미 쓴 글이 있습니다. 반영하면 바꿀지 물어봅니다."
-                              : "");
+        _conflictNote = message.Length > 0 && !importMessage && message != Editor.Text
+            ? " · 온톡 창에 이미 쓴 글이 있습니다. 반영하면 바꿀지 물어봅니다."
+            : "";
+        RefreshHint();
         if (message.Length > 0 && !importMessage && message != Editor.Text)
         {
             // 온톡 창의 글을 초안과 맞춘 적이 없다. 인용만 있는 상태를 기준으로 삼아 반영할 때 충돌로 걸리게 한다.
@@ -156,11 +161,11 @@ public partial class ComposeWindow : Window
         await ApplyAsync(final, _synced, askOnConflict: true);
     }
 
-    private async Task ApplyAsync(string final, string expected, bool askOnConflict)
+    private async Task<bool> ApplyAsync(string final, string expected, bool askOnConflict)
     {
         var hwnd = _target;
         _busy = true;
-        ApplyButton.IsEnabled = false;
+        EnableControls();
         Result("온톡 창에 반영하는 중", ok: true);
         ApplyResult result;
         try
@@ -171,7 +176,7 @@ public partial class ComposeWindow : Window
         finally
         {
             _busy = false;
-            ApplyButton.IsEnabled = _target != IntPtr.Zero;
+            EnableControls();
         }
 
         if (result.Status == ApplyStatus.Conflict && result.After is { } current && askOnConflict)
@@ -186,16 +191,17 @@ public partial class ComposeWindow : Window
                 Editor.Clear();
                 Adopt(current, importMessage: true);
                 Result("온톡 창의 글을 편집기로 가져왔습니다.", ok: true);
+                return false;
             }
             else if (choice == MessageBoxResult.No)
             {
-                await ApplyAsync(final, current.Body, askOnConflict: false);
+                return await ApplyAsync(final, current.Body, askOnConflict: false);
             }
             else
             {
                 Result("반영하지 않았습니다.", ok: false);
             }
-            return;
+            return false;
         }
 
         var clipboard = result.ClipboardRestored ? "" : " 클립보드는 그 사이 바뀌어 되돌리지 않았습니다.";
@@ -205,7 +211,7 @@ public partial class ComposeWindow : Window
                 _synced = final;
                 Result($"반영 확인: 온톡 창을 다시 읽어 본문이 일치했습니다 · {result.After!.UsedBytes}/{result.After.LimitBytes} Bytes · " +
                        $"수신 {(result.After.Recipients.Count > 0 ? string.Join(", ", result.After.Recipients) : "없음")}.{clipboard}", ok: true);
-                break;
+                return true;
             case ApplyStatus.Mismatch:
                 Result("붙여넣은 뒤 다시 읽은 내용이 초안과 다릅니다. 다시 시도하지 않았습니다. 온톡 창을 직접 확인하세요." + clipboard, ok: false);
                 break;
@@ -224,6 +230,7 @@ public partial class ComposeWindow : Window
                 } + clipboard, ok: false);
                 break;
         }
+        return false;
     }
 
     private void Result(string text, bool ok)

@@ -63,6 +63,25 @@ public static class Win32
     internal static extern int AccessibleChildren(
         IAccessible container, int start, int count, [Out] object[] children, out int obtained);
 
+    /// <summary>화면에 보이는 온톡 창과 그 안의 렌더 창.</summary>
+    internal static List<(IntPtr Hwnd, IntPtr Render)> VisibleOnTalkWindows()
+    {
+        var pids = System.Diagnostics.Process.GetProcessesByName("온톡").Select(p => (uint)p.Id).ToHashSet();
+        var found = new List<(IntPtr, IntPtr)>();
+        EnumWindows((hwnd, _) =>
+        {
+            GetWindowThreadProcessId(hwnd, out var pid);
+            if (pids.Contains(pid) && IsWindowVisible(hwnd) && !IsIconic(hwnd) &&
+                ClassName(hwnd).StartsWith("Chrome_WidgetWin", StringComparison.Ordinal) &&
+                FindRenderChild(hwnd) is { } render)
+            {
+                found.Add((hwnd, render));
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
     /// <summary>온톡 창 안에서 웹 화면을 그리는 자식 창. 접근성 트리는 이 창에서 읽는다.</summary>
     internal static IntPtr? FindRenderChild(IntPtr hwnd)
     {

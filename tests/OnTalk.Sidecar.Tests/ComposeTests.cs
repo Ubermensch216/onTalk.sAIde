@@ -138,6 +138,26 @@ public sealed class DraftStoreTests : IDisposable
         Assert.Equal("회신", Assert.Single(store.GetTemplates()).Name);
     }
 
+    [Fact]
+    public void 발송_기록은_누르기_전에_남고_결과로_갱신된다()
+    {
+        using var store = ProfileStore.Open(_root, "user1");
+        var when = new DateTime(2026, 10, 5, 9, 5, 0);
+
+        var first = store.BeginDispatch(["김철수"], "즉시 본문", null, At);
+        var second = store.BeginDispatch(["김철수", "이영희"], "예약 본문", when, At);
+        store.FinishDispatch(second, DispatchStatus.WindowClosed, "");
+
+        var records = store.GetDispatches();
+        Assert.Equal([second, first], records.Select(r => r.Id));
+        Assert.Equal(DispatchStatus.WindowClosed, records[0].Status);
+        Assert.Equal(when, records[0].ReserveAt);
+        Assert.Equal(["김철수", "이영희"], records[0].RecipientNames);
+        // 결과를 기록하지 못한 채 끝난 발송은 "결과 모름"으로 남는다.
+        Assert.Equal(DispatchStatus.Pending, records[1].Status);
+        Assert.Null(records[1].ReserveAt);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

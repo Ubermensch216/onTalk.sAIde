@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using OnTalk.Sidecar.Core;
 
 namespace OnTalk.Sidecar.Automation;
@@ -61,7 +60,11 @@ public static class ComposeWriter
         {
             return new ApplyResult(ApplyStatus.DialogOpen, before);
         }
-        if (expectedCurrentBody is not null && before.Body != expectedCurrentBody.Replace("\r\n", "\n"))
+        // 이미 같은 내용이면 손대지 않는다.
+        if (before.Body == body)
+        {
+            return new ApplyResult(ApplyStatus.Applied, before);
+        }        if (expectedCurrentBody is not null && before.Body != expectedCurrentBody.Replace("\r\n", "\n"))
         {
             return new ApplyResult(ApplyStatus.Conflict, before);
         }
@@ -69,60 +72,22 @@ public static class ComposeWriter
         {
             return new ApplyResult(ApplyStatus.TooLong, before);
         }
-        if (before.Body == body)
-        {
-            return new ApplyResult(ApplyStatus.Applied, before);
-        }
-        if (AnyModifierDown())
-        {
-            return new ApplyResult(ApplyStatus.ModifierDown, before);
-        }
 
-        var render = Win32.FindRenderChild(hwnd)!.Value;
-        var (x, y) = before.BodyBounds.Center;
-        var point = new Point { X = x, Y = y };
-        if (before.BodyBounds.IsEmpty)
+        switch (InputInjector.FocusByClick(hwnd, before.BodyBounds))
         {
-            return new ApplyResult(ApplyStatus.Covered, before);
-        }
-        if (!IsTarget(hwnd, render, WindowFromPoint(point)))
-        {
-            // 활성화 없이 맨 위로만 올린다.
-            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
-            // 다른 프로세스의 창이라 순서 변경이 바로 반영되지 않는다. 0.3초로는 모자란 경우가 있었다.
-            for (var wait = 0; wait < 15 && !IsTarget(hwnd, render, WindowFromPoint(point)); wait++)
-            {
-                Thread.Sleep(100);
-            }
-            if (!IsTarget(hwnd, render, WindowFromPoint(point)))
-            {
+            case FocusOutcome.ModifierDown:
+                return new ApplyResult(ApplyStatus.ModifierDown, before);
+            case FocusOutcome.Covered:
                 return new ApplyResult(ApplyStatus.Covered, before);
-            }
+            case FocusOutcome.NotForeground:
+                return new ApplyResult(ApplyStatus.FocusFailed, Read(hwnd));
         }
-
-        GetCursorPos(out var cursor);
-        SetCursorPos(point.X, point.Y);
-        Mouse(MouseLeftDown);
-        Mouse(MouseLeftUp);
-        Thread.Sleep(350);
-        SetCursorPos(cursor.X, cursor.Y);
-        if (Win32.GetForegroundWindow() != hwnd)
-        {
-            return new ApplyResult(ApplyStatus.FocusFailed, Read(hwnd));
-        }
-
-        if (body.Length == 0)
-        {
-            var cleared = Chord(hwnd, KeyA) && Tap(hwnd, KeyDelete);
-            return Verify(hwnd, body, cleared, clipboardRestored: true);
-        }
-        if (ClipboardSnapshot.Capture() is not { } clipboard || !clipboard.Borrow(body))
+        var (typed, restored) = InputInjector.ReplaceText(hwnd, body);
+        if (!typed && restored && body.Length > 0 && Win32.GetForegroundWindow() == hwnd)
         {
             return new ApplyResult(ApplyStatus.ClipboardBusy, Read(hwnd));
         }
-        var typed = Chord(hwnd, KeyA) && Chord(hwnd, KeyV);
-        var result = Verify(hwnd, body, typed, clipboardRestored: true);
-        return result with { ClipboardRestored = clipboard.Restore() };
+        return Verify(hwnd, body, typed, restored);
     }
 
     // 붙여넣기가 화면에 반영될 때까지 잠깐 기다리며 다시 읽는다.
@@ -144,108 +109,4 @@ public static class ComposeWriter
         }
         return new ApplyResult(after is null ? ApplyStatus.NotCompose : ApplyStatus.Mismatch, after, clipboardRestored);
     }
-
-    private static bool IsTarget(IntPtr hwnd, IntPtr render, IntPtr under) => under == hwnd || under == render;
-
-    // 대상 창이 앞에 있을 때만 키를 보낸다. 다른 창으로 입력이 새지 않게 한다.
-    private static bool Chord(IntPtr hwnd, ushort key)
-    {
-        if (Win32.GetForegroundWindow() != hwnd)
-        {
-            return false;
-        }
-        Key(KeyControl, up: false);
-        Key(key, up: false);
-        Key(key, up: true);
-        Key(KeyControl, up: true);
-        Thread.Sleep(150);
-        return true;
-    }
-
-    private static bool Tap(IntPtr hwnd, ushort key)
-    {
-        if (Win32.GetForegroundWindow() != hwnd)
-        {
-            return false;
-        }
-        Key(key, up: false);
-        Key(key, up: true);
-        Thread.Sleep(150);
-        return true;
-    }
-
-    private static bool AnyModifierDown() =>
-        new[] { 0x10, 0x11, 0x12, 0x5B, 0x5C }.Any(vk => (GetAsyncKeyState(vk) & 0x8000) != 0);
-
-    private static void Key(ushort vk, bool up)
-    {
-        var input = new Input { Type = 1 };
-        input.Data.Keyboard = new KeyboardInput { Vk = vk, Flags = up ? KeyUp : 0 };
-        SendInput(1, [input], Marshal.SizeOf<Input>());
-    }
-
-    private static void Mouse(uint flags)
-    {
-        var input = new Input { Type = 0 };
-        input.Data.Mouse = new MouseInput { Flags = flags };
-        SendInput(1, [input], Marshal.SizeOf<Input>());
-    }
-
-    private const ushort KeyControl = 0x11, KeyA = 0x41, KeyV = 0x56, KeyDelete = 0x2E;
-    private const uint KeyUp = 0x0002, MouseLeftDown = 0x0002, MouseLeftUp = 0x0004;
-    private const uint SwpNoSize = 0x0001, SwpNoMove = 0x0002, SwpNoActivate = 0x0010;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Point
-    {
-        public int X, Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Input
-    {
-        public uint Type;
-        public InputUnion Data;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    private struct InputUnion
-    {
-        [FieldOffset(0)] public MouseInput Mouse;
-        [FieldOffset(0)] public KeyboardInput Keyboard;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MouseInput
-    {
-        public int Dx, Dy;
-        public uint MouseData, Flags, Time;
-        public IntPtr ExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct KeyboardInput
-    {
-        public ushort Vk, Scan;
-        public uint Flags, Time;
-        public IntPtr ExtraInfo;
-    }
-
-    [DllImport("user32.dll")]
-    private static extern uint SendInput(uint count, Input[] inputs, int size);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr WindowFromPoint(Point point);
-
-    [DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out Point point);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int x, int y);
-
-    [DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int vk);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 }

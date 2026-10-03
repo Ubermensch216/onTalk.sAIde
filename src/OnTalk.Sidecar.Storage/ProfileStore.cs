@@ -13,7 +13,7 @@ public sealed record SaveResult(long NoteId, bool IsNew, DateTimeOffset FirstSee
 /// </summary>
 public sealed class ProfileStore : IDisposable
 {
-    private const int SchemaVersion = 4;
+    private const int SchemaVersion = 5;
     private readonly SqliteConnection _db;
 
     public string LoginId { get; }
@@ -165,6 +165,23 @@ public sealed class ProfileStore : IDisposable
                     body TEXT NOT NULL
                 );
                 PRAGMA user_version = 4;
+                COMMIT;
+                """);
+        }
+        if (version < 5)
+        {
+            Execute(db, """
+                BEGIN;
+                CREATE TABLE dispatch (
+                    id         INTEGER PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    recipients TEXT NOT NULL,
+                    body       TEXT NOT NULL,
+                    reserve_at TEXT,
+                    status     TEXT NOT NULL,
+                    detail     TEXT NOT NULL
+                );
+                PRAGMA user_version = 5;
                 COMMIT;
                 """);
         }
@@ -507,6 +524,51 @@ public sealed class ProfileStore : IDisposable
     {
         using var cmd = Command("DELETE FROM template WHERE id = $id", ("$id", id));
         cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// 전송 단추를 누르기 전에 기록을 남긴다. 누른 뒤 앱이 죽어도 "눌렀을 수 있다"는 사실이 남아
+    /// 같은 쪽지를 모르고 다시 보내지 않게 된다.
+    /// </summary>
+    public long BeginDispatch(IReadOnlyList<string> recipientNames, string body, DateTime? reserveAt, DateTimeOffset at)
+    {
+        using var cmd = Command("""
+            INSERT INTO dispatch (created_at, recipients, body, reserve_at, status, detail)
+            VALUES ($at, $names, $body, $reserve, $status, '')
+            RETURNING id
+            """,
+            ("$at", at.ToString("O")), ("$names", JsonSerializer.Serialize(recipientNames)), ("$body", body),
+            ("$reserve", reserveAt?.ToString("yyyy-MM-ddTHH:mm:ss")), ("$status", DispatchStatus.Pending.ToString()));
+        return (long)cmd.ExecuteScalar()!;
+    }
+
+    public void FinishDispatch(long id, DispatchStatus status, string detail)
+    {
+        using var cmd = Command("UPDATE dispatch SET status = $status, detail = $detail WHERE id = $id",
+            ("$status", status.ToString()), ("$detail", detail), ("$id", id));
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>최근 발송 기록. 최신이 먼저다.</summary>
+    public List<DispatchRecord> GetDispatches(int limit = 50)
+    {
+        using var cmd = Command(
+            "SELECT id, created_at, recipients, body, reserve_at, status, detail FROM dispatch ORDER BY id DESC LIMIT $limit",
+            ("$limit", limit));
+        using var reader = cmd.ExecuteReader();
+        var records = new List<DispatchRecord>();
+        while (reader.Read())
+        {
+            records.Add(new DispatchRecord(
+                reader.GetInt64(0),
+                DateTimeOffset.Parse(reader.GetString(1)),
+                JsonSerializer.Deserialize<List<string>>(reader.GetString(2)) ?? [],
+                reader.GetString(3),
+                reader.IsDBNull(4) ? null : DateTime.Parse(reader.GetString(4)),
+                Enum.Parse<DispatchStatus>(reader.GetString(5)),
+                reader.GetString(6)));
+        }
+        return records;
     }
 
     private SqliteCommand Command(string sql, params (string Name, object? Value)[] parameters)

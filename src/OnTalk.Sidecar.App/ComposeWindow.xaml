@@ -1,7 +1,7 @@
 <Window x:Class="OnTalk.Sidecar.App.ComposeWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="작성 도우미 · onTalk.sAIde" Width="560" Height="680" MinWidth="460" MinHeight="480"
+        Title="작성 도우미 · onTalk.sAIde" Width="620" Height="720" MinWidth="600" MinHeight="480"
         FontFamily="Malgun Gothic" FontSize="13" Background="White" UseLayoutRounding="True"
         WindowStartupLocation="CenterScreen">
     <DockPanel>
@@ -15,19 +15,60 @@
                 </DockPanel>
                 <TextBlock x:Name="TargetHint" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"
                            Margin="0,6,0,0" />
+
+                <StackPanel x:Name="OnTalkControls">
+                    <DockPanel Margin="0,10,0,0">
+                        <TextBlock DockPanel.Dock="Left" Text="받는 사람 찾기" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <Button x:Name="FindButton" DockPanel.Dock="Right" Content="온톡에서 찾기" Padding="10,2"
+                                Margin="8,0,0,0" Click="OnFindRecipient" />
+                        <TextBox x:Name="RecipientName" Padding="4,3" />
+                    </DockPanel>
+                    <StackPanel x:Name="CandidatePanel" Visibility="Collapsed" Margin="0,6,0,0">
+                        <ListBox x:Name="CandidateList" MaxHeight="150" HorizontalContentAlignment="Stretch"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="2,3">
+                                        <TextBlock Text="{Binding Headline}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding DetailLine}" Foreground="{StaticResource Muted}"
+                                                   FontSize="12" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <Button x:Name="AddRecipientButton" Content="고른 사람을 수신자로 추가" HorizontalAlignment="Left"
+                                Padding="10,2" Margin="0,6,0,0" Click="OnAddRecipient" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                        <TextBlock Text="예약 전송" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <DatePicker x:Name="ReserveDate" Width="120" />
+                        <ComboBox x:Name="ReserveHour" Width="52" Margin="8,0,0,0" />
+                        <TextBlock Text="시" VerticalAlignment="Center" Margin="4,0,0,0" />
+                        <ComboBox x:Name="ReserveMinute" Width="52" Margin="8,0,0,0" />
+                        <TextBlock Text="분" VerticalAlignment="Center" Margin="4,0,0,0" />
+                        <Button x:Name="ReserveButton" Content="온톡에 설정" Padding="10,2" Margin="10,0,0,0"
+                                Click="OnSetReservation" />
+                        <Button x:Name="UnreserveButton" Content="예약 풀기" Padding="10,2" Margin="6,0,0,0"
+                                Click="OnCancelReservation" />
+                    </StackPanel>
+                    <TextBlock x:Name="ControlStatus" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"
+                               Margin="0,6,0,0" />
+                </StackPanel>
             </StackPanel>
         </Border>
 
         <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="14,10">
             <StackPanel>
                 <DockPanel>
+                    <Button x:Name="SendButton" DockPanel.Dock="Right" Content="전송…" Padding="16,4"
+                            Margin="8,0,0,0" Click="OnSend" />
                     <Button x:Name="ApplyButton" DockPanel.Dock="Right" Content="온톡 창에 반영" Padding="16,4"
                             Margin="10,0,0,0" Click="OnApply" />
                     <TextBlock x:Name="ByteText" VerticalAlignment="Center" />
                 </DockPanel>
                 <TextBlock x:Name="ResultText" TextWrapping="Wrap" Margin="0,8,0,0" />
                 <TextBlock Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"
-                           Text="반영은 온톡 입력창을 클릭해 붙여넣는 방식이라 잠깐 마우스와 창이 움직입니다. 전송은 하지 않습니다. 내용을 확인한 뒤 온톡에서 직접 보내세요." />
+                           Text="반영은 온톡 입력창을 클릭해 붙여넣는 방식이라 잠깐 마우스와 창이 움직입니다. 전송은 받는 사람·본문·예약을 다시 확인하는 창에서 승인해야만 실행되고, 결과가 불확실해도 다시 보내지 않습니다." />
             </StackPanel>
         </Border>
 

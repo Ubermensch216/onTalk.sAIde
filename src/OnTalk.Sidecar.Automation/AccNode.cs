@@ -15,10 +15,20 @@ public sealed record AccNode(string Role, string Name, string Value, int State, 
     public const string Document = "document";
     public const string EditableText = "text";
     public const string CheckBox = "checkbox";
+    public const string ComboBox = "combobox";
+    public const string ListItem = "listitem";
+    public const string Cell = "cell";
+    public const string Graphic = "graphic";
 
     public const int StateChecked = 0x10;
 
     public AccBounds Bounds { get; init; }
+
+    /// <summary>뿌리에서 이 요소까지의 자식 순번("0/2/1"). 읽은 직후 같은 요소를 다시 찾는 데 쓴다.</summary>
+    public string Path { get; init; } = "";
+
+    /// <summary>클릭 같은 기본 동작이 있는지.</summary>
+    public bool HasAction { get; init; }
 
     public IEnumerable<AccNode> DescendantsAndSelf()
     {
@@ -36,4 +46,8 @@ public sealed record AccNode(string Role, string Name, string Value, int State, 
         DescendantsAndSelf().Where(n => n.Role == StaticText).Select(n => n.Name);
 
     public bool ContainsText(string text) => StaticTexts().Any(t => t == text);
+
+    /// <summary>글자가 정확히 <paramref name="text"/>인 요소를 직접 자식으로 가진 요소. 온톡의 단추는 글자를 감싼 DIV다.</summary>
+    public AccNode? ButtonLabeled(string text) =>
+        DescendantsAndSelf().FirstOrDefault(n => n.Children.Any(c => c.Role == StaticText && c.Name == text));
 }

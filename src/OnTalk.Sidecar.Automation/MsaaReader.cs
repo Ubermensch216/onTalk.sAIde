@@ -13,14 +13,14 @@ internal static class MsaaReader
 
     private static readonly Dictionary<int, string> RoleNames = new()
     {
-        [0x0F] = AccNode.Document, [0x1E] = "link", [0x21] = "list", [0x22] = "listitem", [0x18] = "table",
+        [0x0F] = AccNode.Document, [0x1E] = "link", [0x21] = "list", [0x22] = AccNode.ListItem, [0x18] = "table",
         [0x28] = "graphic", [0x29] = AccNode.StaticText, [0x2A] = AccNode.EditableText, [0x2B] = "pushbutton",
-        [0x2C] = AccNode.CheckBox, [0x2E] = "combobox", [0x3B] = AccNode.Whitespace,
+        [0x2C] = AccNode.CheckBox, [0x2E] = AccNode.ComboBox, [0x3B] = AccNode.Whitespace, [0x1D] = AccNode.Cell,
     };
 
     /// <summary>루트 요소만 읽는다. 창 종류 판별용.</summary>
     public static AccNode? ReadRoot(IntPtr renderHwnd) =>
-        Root(renderHwnd) is { } acc ? Read(acc, []) : null;
+        Root(renderHwnd) is { } acc ? Read(acc, [], "") : null;
 
     public static AccNode? ReadTree(IntPtr renderHwnd)
     {
@@ -29,7 +29,48 @@ internal static class MsaaReader
             return null;
         }
         var budget = MaxNodes;
-        return ReadSubtree(root, ref budget);
+        return ReadSubtree(root, "", ref budget);
+    }
+
+    /// <summary>
+    /// 앞서 읽은 요소를 다시 찾아 기본 동작(웹 요소의 클릭)을 실행한다. 좌표가 아니라 요소 자체를 지정하므로
+    /// 다른 창이나 다른 요소가 눌리지 않는다. 그 사이 화면이 바뀌어 같은 자리의 요소가 달라졌으면 실행하지 않는다.
+    /// </summary>
+    public static bool Invoke(IntPtr renderHwnd, AccNode expected)
+    {
+        if (Root(renderHwnd) is not { } acc)
+        {
+            return false;
+        }
+        foreach (var index in expected.Path.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse))
+        {
+            var count = Safe(() => acc.accChildCount);
+            if (index >= count)
+            {
+                return false;
+            }
+            var raw = new object[count];
+            if (Win32.AccessibleChildren(acc, 0, count, raw, out var got) != 0 || index >= got ||
+                raw[index] is not IAccessible child)
+            {
+                return false;
+            }
+            acc = child;
+        }
+        var now = Read(acc, [], expected.Path);
+        if (now.Role != expected.Role || now.Name != expected.Name)
+        {
+            return false;
+        }
+        try
+        {
+            acc.accDoDefaultAction(Self);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static IAccessible? Root(IntPtr renderHwnd)
@@ -40,7 +81,7 @@ internal static class MsaaReader
             : null;
     }
 
-    private static AccNode ReadSubtree(IAccessible acc, ref int budget)
+    private static AccNode ReadSubtree(IAccessible acc, string path, ref int budget)
     {
         budget--;
         var children = new List<AccNode>();
@@ -55,15 +96,15 @@ internal static class MsaaReader
                     // 정수 자식 ID(단순 요소)는 Chromium 웹 콘텐츠에서 쓰이지 않는다.
                     if (raw[i] is IAccessible child)
                     {
-                        children.Add(ReadSubtree(child, ref budget));
+                        children.Add(ReadSubtree(child, path.Length == 0 ? $"{i}" : $"{path}/{i}", ref budget));
                     }
                 }
             }
         }
-        return Read(acc, children);
+        return Read(acc, children, path);
     }
 
-    private static AccNode Read(IAccessible acc, IReadOnlyList<AccNode> children)
+    private static AccNode Read(IAccessible acc, IReadOnlyList<AccNode> children, string path)
     {
         var role = Safe(() => acc.get_accRole(Self)) switch
         {
@@ -86,7 +127,7 @@ internal static class MsaaReader
             Safe(() => acc.get_accName(Self)) ?? "",
             Safe(() => acc.get_accValue(Self)) ?? "",
             Safe(() => acc.get_accState(Self)) is int state ? state : 0,
-            children) { Bounds = bounds };
+            children) { Bounds = bounds, Path = path, HasAction = (Safe(() => acc.get_accDefaultAction(Self)) ?? "").Length > 0 };
     }
 
     private static T? Safe<T>(Func<T> f)

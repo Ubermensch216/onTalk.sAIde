@@ -17,6 +17,11 @@ using OnTalk.Sidecar.Core;
 //   apply --hwnd 0x..               사이드카의 작성창 반영 기능 시험: 시험 문장을 넣고 확인한 뒤 비운다
 //   clip                            클립보드 보존 기능 시험: 떠 두기, 빌려 쓰기, 되돌리기 후 비교
 //   write                           합성 쪽지로 AI 답장 초안 시험 (온톡과 무관)
+//   look --hwnd 0x.. [--content]    라이브러리로 읽은 트리(경로 포함). 탐색용
+//   paste --hwnd 0x.. --path P --text T [--enter]  입력창을 클릭해 글자를 붙여넣는다. 사용자 허락 범위에서만
+//   do --hwnd 0x.. --path 0/1/2     해당 요소의 기본 동작(클릭) 실행. 사용자 허락 범위에서만
+//   reserve --hwnd 0x.. --at "2026-10-05 09:05"   예약 일시를 설정하고 확인한 뒤 취소한다 (전송 없음)
+//   people --hwnd 0x.. --name 이름   받는 사람 추가 창에서 검색만 한다 (선택·전송 없음)
 //   input --hwnd 0x..               빈 새 쪽지 창에 붙여넣기 시험 (사용자 허락 후에만 실행)
 // input 명령을 빼면 입력·클릭 등 온톡을 조작하는 동작은 하지 않는다.
 //
@@ -46,6 +51,90 @@ if (command == "soak")
         using var self = Process.GetCurrentProcess();
         Console.WriteLine($"ticks={ticks} private={self.PrivateMemorySize64 / 1048576}MB gcHeap={GC.GetTotalMemory(false) / 1048576}MB gen2={GC.CollectionCount(2)}");
     }
+    return 0;
+}
+if (command == "reserve")
+{
+    var compose = new IntPtr(Convert.ToInt64(hwndArg!, 16));
+    var when = DateTime.Parse(Option("--at")!);
+    var sw = Stopwatch.StartNew();
+    var set = ComposeActions.SetReservation(compose, when);
+    Console.WriteLine($"설정 {when:yyyy-MM-dd HH:mm}: {set} ({sw.ElapsedMilliseconds}ms), 작성 창 표시 = {ComposeWriter.Read(compose)?.Reservation:yyyy-MM-dd HH:mm}");
+    var cancel = ComposeActions.CancelReservation(compose);
+    var after = ComposeWriter.Read(compose);
+    Console.WriteLine($"취소: {cancel}, 예약 남음={after?.Reservation is not null}, 대화상자={after?.DialogOpen}");
+    return 0;
+}
+if (command == "people")
+{
+    var compose = new IntPtr(Convert.ToInt64(hwndArg!, 16));
+    var found = ComposeActions.SearchRecipient(compose, Option("--name")!);
+    Console.WriteLine($"검색: {found.Status}, 같은 이름 {found.Rows.Count}명");
+    foreach (var row in found.Rows)
+    {
+        // 다른 사람의 정보는 출력하지 않는다. 구분에 쓸 정보가 몇 칸 있는지만 본다.
+        Console.WriteLine($"   직급 {row.Title.Length}자, 세부 {row.Details.Count}칸");
+    }
+    Console.WriteLine($"서로 구분됨: {found.Rows.Select(r => (r.Title, string.Join("|", r.Details))).Distinct().Count() == found.Rows.Count}");
+    return 0;
+}
+if (command == "paste")
+{
+    var target = new IntPtr(Convert.ToInt64(hwndArg!, 16));
+    var tree = MsaaReader.ReadTree(Win32.FindRenderChild(target) ?? IntPtr.Zero);
+    var node = tree?.DescendantsAndSelf().FirstOrDefault(n => n.Path == Option("--path"));
+    if (node is null || node.Role != AccNode.EditableText)
+    {
+        Console.WriteLine("그 경로에 입력창이 없습니다.");
+        return 1;
+    }
+    var focus = InputInjector.FocusByClick(target, node.Bounds);
+    Console.WriteLine($"포커스: {focus}");
+    if (focus != FocusOutcome.Focused)
+    {
+        return 4;
+    }
+    var (typed, restored) = InputInjector.ReplaceText(target, Option("--text") ?? "");
+    var entered = args.Contains("--enter") && InputInjector.Tap(target, InputInjector.KeyEnter);
+    Console.WriteLine($"입력={typed}, 클립보드 복원={restored}, Enter={entered}");
+    return 0;
+}
+if (command is "look" or "do")
+{
+    var target = new IntPtr(Convert.ToInt64(hwndArg!, 16));
+    var render = Win32.FindRenderChild(target) ?? IntPtr.Zero;
+    var tree = MsaaReader.ReadTree(render);
+    if (tree is null)
+    {
+        Console.WriteLine("읽지 못했습니다.");
+        return 1;
+    }
+    if (command == "look")
+    {
+        var filter = Option("--grep");
+        foreach (var n in tree.DescendantsAndSelf())
+        {
+            // 글자가 있거나 누를 수 있는 요소만 보여 준다.
+            if (n.Name.Length == 0 && n.Value.Length == 0 && !n.HasAction || n.Bounds.IsEmpty)
+            {
+                continue;
+            }
+            var text = withContent ? $"\"{n.Name.ReplaceLineEndings("⏎")}\"" + (n.Value.Length > 0 ? $" ={n.Value.ReplaceLineEndings("⏎")}" : "") : $"[{n.Name.Length}자]";
+            var line = $"{n.Path,-28} {n.Role,-11} {(n.HasAction ? "A" : " ")} {n.Bounds.X},{n.Bounds.Y} {n.Bounds.Width}x{n.Bounds.Height} s={n.State:X} {text}";
+            if (filter is null || line.Contains(filter))
+            {
+                Console.WriteLine(line);
+            }
+        }
+        return 0;
+    }
+    var node = tree.DescendantsAndSelf().FirstOrDefault(n => n.Path == Option("--path"));
+    if (node is null)
+    {
+        Console.WriteLine("그 경로의 요소가 없습니다.");
+        return 1;
+    }
+    Console.WriteLine($"대상: {node.Role} [{node.Name.Length}자] {node.Bounds.Width}x{node.Bounds.Height} -> 실행 {MsaaReader.Invoke(render, node)}");
     return 0;
 }
 if (command == "write")
