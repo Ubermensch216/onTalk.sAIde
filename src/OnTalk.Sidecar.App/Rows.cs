@@ -36,3 +36,29 @@ public sealed class TaskRow(TaskItem task, DateTimeOffset now, string? origin = 
         _ => "기한 없음 · 알리지 않음",
     };
 }
+
+/// <summary>패널의 첨부파일 한 줄.</summary>
+public sealed class AttachmentRow(AttachmentInfo info)
+{
+    public long Id { get; } = info.Id;
+    public string Name { get; } = info.Name;
+    public bool Stored { get; } = info.Sha256 is not null;
+
+    public string StatusLine { get; } = info switch
+    {
+        { Sha256: null } => "이름만 기록됨 · 파일은 아직 확보하지 않음",
+        _ => $"보관됨 {Size(info.Size ?? 0)} · " + info.Extract switch
+        {
+            ExtractStatus.Extracted => "내용 검색 가능",
+            ExtractStatus.Failed => "내용을 읽지 못함",
+            _ => "내용 검색은 지원하지 않는 형식",
+        },
+    };
+
+    private static string Size(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes}B",
+        < 1024 * 1024 => $"{bytes / 1024.0:0.#}KB",
+        _ => $"{bytes / 1024.0 / 1024.0:0.#}MB",
+    };
+}

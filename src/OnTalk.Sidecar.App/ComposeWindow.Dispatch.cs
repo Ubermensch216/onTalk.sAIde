@@ -12,6 +12,13 @@ public sealed class CandidateItem(PersonRow row)
     public string DetailLine { get; } = string.Join(" · ", row.Details);
 }
 
+/// <summary>그룹 선택 상자의 한 줄.</summary>
+public sealed class GroupItem(RecipientGroup group)
+{
+    public RecipientGroup Group { get; } = group;
+    public string Label { get; } = $"{group.Name} ({group.Members.Count}명)";
+}
+
 // 수신자 추가, 예약 설정, 전송. 온톡의 단추를 누르는 조작이다.
 public partial class ComposeWindow
 {
@@ -27,6 +34,7 @@ public partial class ComposeWindow
         ReserveDate.SelectedDate = next.Date;
         ReserveHour.SelectedItem = next.Hour;
         ReserveMinute.SelectedItem = 0;
+        ReloadGroups();
     }
 
     private void EnableControls()
@@ -122,6 +130,65 @@ public partial class ComposeWindow
         else
         {
             ControlStatus.Text = "수신자를 추가하지 못했습니다. " + Explain(status);
+        }
+    }
+
+    private void ReloadGroups() =>
+        GroupBox.ItemsSource = _store.GetGroups().Select(g => new GroupItem(g)).ToList();
+
+    private async void OnAddGroup(object sender, RoutedEventArgs e)
+    {
+        if (GroupBox.SelectedItem is not GroupItem { Group: var group })
+        {
+            ControlStatus.Text = "넣을 그룹을 고르세요.";
+            return;
+        }
+        var hwnd = _target;
+        var (added, failed, status) = await RunOnTalk($"그룹 '{group.Name}'의 {group.Members.Count}명을 온톡에 넣는 중",
+            () => ComposeActions.AddRecipients(hwnd, group.Members));
+        _picked.AddRange(group.Members.Take(added));
+        ControlStatus.Text = failed is null
+            ? $"그룹 '{group.Name}'의 {added}명을 모두 넣었고 온톡 창에서 확인했습니다."
+            : $"{group.Members.Count}명 중 {added}명을 넣고 '{failed.Name}'에서 멈췄습니다. " +
+              (status == ActionStatus.Mismatch
+                  ? "저장할 때와 직급·소속이 같은 사람을 찾지 못했습니다. 인사이동이 있었다면 직접 찾아 넣고 그룹을 다시 저장하세요."
+                  : Explain(status));
+    }
+
+    private void OnSaveGroup(object sender, RoutedEventArgs e)
+    {
+        var name = GroupBox.Text.Trim();
+        // 표시용 꼬리표("이름 (3명)")가 붙은 채로 저장하지 않는다.
+        if (GroupBox.SelectedItem is GroupItem selected && name == selected.Label)
+        {
+            name = selected.Group.Name;
+        }
+        if (name.Length == 0 || _picked.Count == 0)
+        {
+            ControlStatus.Text = "그룹 칸에 이름을 적고, 이 창에서 '온톡에서 찾기'로 넣은 수신자가 한 명 이상 있어야 합니다. " +
+                                 "온톡에서 직접 넣은 수신자는 소속을 알 수 없어 그룹에 담지 못합니다.";
+            return;
+        }
+        var members = _picked.Distinct().ToList();
+        if (_store.GetGroups().Any(g => g.Name == name) &&
+            MessageBox.Show(this, $"그룹 '{name}'의 구성원을 지금 넣은 {members.Count}명으로 바꿀까요?", "그룹 덮어쓰기",
+                MessageBoxButton.OKCancel) != MessageBoxResult.OK)
+        {
+            return;
+        }
+        _store.SaveGroup(name, members);
+        ReloadGroups();
+        ControlStatus.Text = $"그룹 '{name}'에 {members.Count}명을 저장했습니다: {string.Join(", ", members.Select(m => m.Name))}";
+    }
+
+    private void OnDeleteGroup(object sender, RoutedEventArgs e)
+    {
+        if (GroupBox.SelectedItem is GroupItem { Group: var group } &&
+            MessageBox.Show(this, $"그룹 '{group.Name}'을(를) 삭제할까요?", "그룹 삭제", MessageBoxButton.OKCancel) ==
+            MessageBoxResult.OK)
+        {
+            _store.DeleteGroup(group.Id);
+            ReloadGroups();
         }
     }
 

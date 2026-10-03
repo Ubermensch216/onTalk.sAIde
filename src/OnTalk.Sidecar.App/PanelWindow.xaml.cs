@@ -291,7 +291,7 @@ public partial class PanelWindow : Window
             BodyText.ScrollToHome();
             AttachmentPanel.Visibility = note.AttachmentNames.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             AttachmentTitle.Text = $"첨부 파일 {note.AttachmentNames.Count}개";
-            AttachmentList.ItemsSource = note.AttachmentNames;
+            AttachmentList.ItemsSource = null;
             ManualTitle.Clear();
             ManualDue.SelectedDate = null;
         }
@@ -317,6 +317,7 @@ public partial class PanelWindow : Window
         var tasks = _store.GetTasks(noteId);
         NoteTaskList.ItemsSource = tasks.Select(t => new TaskRow(t, now)).ToList();
         NoTaskText.Visibility = tasks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        AttachmentList.ItemsSource = _store.GetAttachments(noteId).Select(a => new AttachmentRow(a)).ToList();
         UpdateFooter();
 
         var analysis = _store.GetAnalysis(noteId, _analyzer.Model, OllamaAnalyzer.PromptVersion);
@@ -438,6 +439,72 @@ public partial class PanelWindow : Window
             _store.SetTaskDone(id, box.IsChecked == true, DateTimeOffset.Now);
             RefreshWork();
             _tasksWindow?.Reload();
+        }
+    }
+
+    private void OnImportAttachment(object sender, RoutedEventArgs e)
+    {
+        if (_store is null || _shownNoteId is not { } noteId || sender is not Button { Tag: long id } ||
+            _store.GetAttachments(noteId).FirstOrDefault(a => a.Id == id) is not { } attachment)
+        {
+            return;
+        }
+        var dialog = new Microsoft.Win32.OpenFileDialog { Title = $"'{attachment.Name}' 파일 고르기", FileName = attachment.Name };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+        try
+        {
+            var file = new FileInfo(dialog.FileName);
+            if (file.Length > ProfileStore.MaxFileBytes)
+            {
+                MessageBox.Show(this, "200MB를 넘는 파일은 보관하지 않습니다.", "onTalk.sAIde");
+                return;
+            }
+            if (!string.Equals(file.Name, attachment.Name, StringComparison.OrdinalIgnoreCase) &&
+                MessageBox.Show(this, $"고른 파일 이름이 첨부 이름과 다릅니다.\n\n첨부: {attachment.Name}\n고른 파일: {file.Name}\n\n이 파일로 보관할까요?",
+                    "이름이 다릅니다", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+            {
+                return;
+            }
+            var data = File.ReadAllBytes(file.FullName);
+            if (attachment.Sha256 is { } old &&
+                old != Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(data)) &&
+                MessageBox.Show(this, "이미 보관한 파일과 내용이 다릅니다. 새 파일로 바꿀까요?", "내용이 다릅니다",
+                    MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+            {
+                return;
+            }
+            _store.StoreAttachment(id, data, DateTimeOffset.Now);
+            RefreshWork();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            MessageBox.Show(this, $"파일을 보관하지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
+        }
+    }
+
+    private void OnExportAttachment(object sender, RoutedEventArgs e)
+    {
+        if (_store is null || _shownNoteId is not { } noteId || sender is not Button { Tag: long id } ||
+            _store.GetAttachments(noteId).FirstOrDefault(a => a.Id == id) is not { } attachment)
+        {
+            return;
+        }
+        var dialog = new Microsoft.Win32.SaveFileDialog { Title = "보관한 파일 내보내기", FileName = attachment.Name };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+        try
+        {
+            File.WriteAllBytes(dialog.FileName, _store.ReadAttachment(id));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // InvalidDataException(보관 파일 손상)도 IOException이다.
+            MessageBox.Show(this, $"파일을 내보내지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
         }
     }
 

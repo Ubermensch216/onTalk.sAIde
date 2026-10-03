@@ -22,6 +22,7 @@ using OnTalk.Sidecar.Core;
 //   do --hwnd 0x.. --path 0/1/2     해당 요소의 기본 동작(클릭) 실행. 사용자 허락 범위에서만
 //   reserve --hwnd 0x.. --at "2026-10-05 09:05"   예약 일시를 설정하고 확인한 뒤 취소한다 (전송 없음)
 //   people --hwnd 0x.. --name 이름   받는 사람 추가 창에서 검색만 한다 (선택·전송 없음)
+//   group --hwnd 0x.. --name 이름 --title 직급   그 사람 한 명짜리 그룹을 수신자로 넣는 흐름 시험 (전송 없음)
 //   input --hwnd 0x..               빈 새 쪽지 창에 붙여넣기 시험 (사용자 허락 후에만 실행)
 // input 명령을 빼면 입력·클릭 등 온톡을 조작하는 동작은 하지 않는다.
 //
@@ -63,6 +64,26 @@ if (command == "reserve")
     var cancel = ComposeActions.CancelReservation(compose);
     var after = ComposeWriter.Read(compose);
     Console.WriteLine($"취소: {cancel}, 예약 남음={after?.Reservation is not null}, 대화상자={after?.DialogOpen}");
+    return 0;
+}
+if (command == "group")
+{
+    var compose = new IntPtr(Convert.ToInt64(hwndArg!, 16));
+    var found = ComposeActions.SearchRecipient(compose, Option("--name")!);
+    var me = found.Rows.Where(r => r.Title == Option("--title") && r.Details.Any(d => d.Contains(Option("--dept") ?? ""))).ToList();
+    if (found.Status != ActionStatus.Ok || me.Count != 1)
+    {
+        Console.WriteLine($"중단: 검색 {found.Status}, 그 직급의 사람 {me.Count}명");
+        return 3;
+    }
+    var member = me[0].ToRecipient();
+    var stale = member with { Details = [.. member.Details.Take(1), "없는 부서", .. member.Details.Skip(2)] };
+    var wrong = ComposeActions.AddRecipients(compose, [stale]);
+    Console.WriteLine($"소속이 달라진 구성원: 넣은 수 {wrong.Added}, 상태 {wrong.Status} (넣지 않고 멈춰야 함)");
+    var before = ComposeWriter.Read(compose)?.Recipients.Count;
+    var result = ComposeActions.AddRecipients(compose, [member]);
+    var after = ComposeWriter.Read(compose);
+    Console.WriteLine($"정확히 같은 구성원: 넣은 수 {result.Added}, 상태 {result.Status}, 수신자 {before} -> {after?.Recipients.Count}, 이름 일치={after?.Recipients.Contains(member.Name)}");
     return 0;
 }
 if (command == "people")

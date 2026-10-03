@@ -11,17 +11,20 @@ public sealed record SaveResult(long NoteId, bool IsNew, DateTimeOffset FirstSee
 /// 온톡 계정 하나의 저장소. 계정마다 폴더와 암호화 키가 따로 있어 다른 계정 자료와 섞이지 않는다.
 /// DB는 SQLCipher로 암호화하고, 키는 Windows 사용자 계정(DPAPI)으로 보호한다.
 /// </summary>
-public sealed class ProfileStore : IDisposable
+public sealed partial class ProfileStore : IDisposable
 {
-    private const int SchemaVersion = 5;
+    private const int SchemaVersion = 6;
     private readonly SqliteConnection _db;
 
     public string LoginId { get; }
 
-    private ProfileStore(string loginId, SqliteConnection db)
+    private ProfileStore(string loginId, SqliteConnection db, string dir, byte[] key)
     {
         LoginId = loginId;
         _db = db;
+        _filesDir = Path.Combine(dir, "files");
+        // 파일 암호화에는 DB 키를 그대로 쓰지 않고 거기서 갈라낸 키를 쓴다.
+        _fileKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, key, 32, info: "OnTalk.sAIde files"u8.ToArray());
     }
 
     public static string DefaultRoot => Path.Combine(
@@ -54,7 +57,7 @@ public sealed class ProfileStore : IDisposable
             db.Dispose();
             throw;
         }
-        return new ProfileStore(loginId, db);
+        return new ProfileStore(loginId, db, dir, key);
     }
 
     private static byte[] LoadOrCreateKey(string keyPath, bool dbExists)
@@ -182,6 +185,30 @@ public sealed class ProfileStore : IDisposable
                     detail     TEXT NOT NULL
                 );
                 PRAGMA user_version = 5;
+                COMMIT;
+                """);
+        }
+        if (version < 6)
+        {
+            Execute(db, """
+                BEGIN;
+                ALTER TABLE attachment ADD COLUMN sha256 TEXT;
+                ALTER TABLE attachment ADD COLUMN size INTEGER;
+                ALTER TABLE attachment ADD COLUMN stored_at TEXT;
+                ALTER TABLE attachment ADD COLUMN extract_status TEXT;
+                ALTER TABLE attachment ADD COLUMN text TEXT;
+                CREATE TABLE recipient_group (
+                    id   INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE
+                );
+                CREATE TABLE group_member (
+                    id       INTEGER PRIMARY KEY,
+                    group_id INTEGER NOT NULL REFERENCES recipient_group(id) ON DELETE CASCADE,
+                    name     TEXT NOT NULL,
+                    title    TEXT NOT NULL,
+                    details  TEXT NOT NULL
+                );
+                PRAGMA user_version = 6;
                 COMMIT;
                 """);
         }
@@ -370,7 +397,8 @@ public sealed class ProfileStore : IDisposable
         {
             where.Add($"""
                 ((n.sender_name || ' ' || n.sender_detail || ' ' || n.body) LIKE $t{i} ESCAPE '\'
-                 OR EXISTS (SELECT 1 FROM attachment a WHERE a.note_id = n.id AND a.name LIKE $t{i} ESCAPE '\'))
+                 OR EXISTS (SELECT 1 FROM attachment a WHERE a.note_id = n.id
+                            AND (a.name LIKE $t{i} ESCAPE '\' OR a.text LIKE $t{i} ESCAPE '\')))
                 """);
             var escaped = query.Terms[i].Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_");
             parameters.Add(($"$t{i}", $"%{escaped}%"));

@@ -39,6 +39,15 @@
                         <Button x:Name="AddRecipientButton" Content="고른 사람을 수신자로 추가" HorizontalAlignment="Left"
                                 Padding="10,2" Margin="0,6,0,0" Click="OnAddRecipient" />
                     </StackPanel>
+                    <DockPanel Margin="0,10,0,0">
+                        <TextBlock DockPanel.Dock="Left" Text="수신자 그룹" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <Button DockPanel.Dock="Right" Content="삭제" Padding="8,2" Margin="6,0,0,0" Click="OnDeleteGroup" />
+                        <Button DockPanel.Dock="Right" Content="넣은 사람을 그룹으로 저장" Padding="8,2" Margin="6,0,0,0"
+                                Click="OnSaveGroup" />
+                        <Button DockPanel.Dock="Right" Content="그룹 넣기" Padding="10,2" Margin="8,0,0,0"
+                                Click="OnAddGroup" />
+                        <ComboBox x:Name="GroupBox" IsEditable="True" DisplayMemberPath="Label" />
+                    </DockPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                         <TextBlock Text="예약 전송" VerticalAlignment="Center" Margin="0,0,8,0" />
                         <DatePicker x:Name="ReserveDate" Width="120" />

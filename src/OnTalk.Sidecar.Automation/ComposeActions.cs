@@ -110,6 +110,38 @@ public static class ComposeActions
             : ActionStatus.Mismatch;
     }
 
+    /// <summary>
+    /// 저장해 둔 사람들을 차례로 수신자에 넣는다. 이름으로 검색한 뒤 저장할 때 본 직급·소속과 정확히 같은
+    /// 한 사람만 넣는다. 한 명이라도 찾지 못하거나 넣지 못하면 거기서 멈춘다.
+    /// </summary>
+    /// <returns>Added: 넣은 인원. Failed: 멈춘 사람(모두 넣었으면 null).</returns>
+    public static (int Added, Core.Recipient? Failed, ActionStatus Status) AddRecipients(
+        IntPtr compose, IReadOnlyList<Core.Recipient> members)
+    {
+        var added = 0;
+        foreach (var member in members)
+        {
+            var found = SearchRecipient(compose, member.Name);
+            if (found.Status != ActionStatus.Ok)
+            {
+                return (added, member, found.Status);
+            }
+            var matches = found.Rows.Where(r => r.Title == member.Title && r.Details.SequenceEqual(member.Details)).ToList();
+            if (matches.Count != 1)
+            {
+                // 인사이동 등으로 소속이 달라졌으면 같은 이름의 다른 사람을 넣지 않고 멈춘다.
+                return (added, member, ActionStatus.Mismatch);
+            }
+            var status = AddRecipient(compose, found.SearchWindow, matches[0]);
+            if (status != ActionStatus.Ok)
+            {
+                return (added, member, status);
+            }
+            added++;
+        }
+        return (added, null, ActionStatus.Ok);
+    }
+
     /// <summary>예약 전송 일시를 정한다. 대화상자에 표시된 일시와 작성 창에 표시된 일시를 모두 다시 읽어 확인한다.</summary>
     public static ActionStatus SetReservation(IntPtr compose, DateTime when)
     {

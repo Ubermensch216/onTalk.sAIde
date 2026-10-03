@@ -156,12 +156,22 @@
                                 <ItemsControl x:Name="AttachmentList">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" Margin="0,1" />
+                                            <DockPanel Margin="0,3">
+                                                <Button DockPanel.Dock="Right" Content="내보내기" Padding="6,1" Margin="4,0,0,0"
+                                                        VerticalAlignment="Top" Tag="{Binding Id}" IsEnabled="{Binding Stored}"
+                                                        Click="OnExportAttachment" />
+                                                <Button DockPanel.Dock="Right" Content="가져오기" Padding="6,1" Margin="6,0,0,0"
+                                                        VerticalAlignment="Top" Tag="{Binding Id}" Click="OnImportAttachment" />
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding StatusLine}" Style="{StaticResource Small}" />
+                                                </StackPanel>
+                                            </DockPanel>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
                                 <TextBlock Style="{StaticResource Small}" Margin="0,4,0,0"
-                                           Text="파일 이름만 기록했습니다. 파일 자체는 아직 확보하지 않습니다." />
+                                           Text="온톡에서 '저장'으로 받은 파일을 '가져오기'로 고르면 암호화해 보관합니다. 온톡의 첨부파일은 7일 뒤 지워집니다." />
                             </StackPanel>
                             <TextBox x:Name="BodyText" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0,0,0,1"
                                      BorderBrush="{StaticResource Line}" Padding="12,10"
