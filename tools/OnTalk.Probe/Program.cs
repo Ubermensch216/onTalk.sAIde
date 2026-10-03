@@ -14,6 +14,9 @@ using OnTalk.Sidecar.Core;
 //   notes [--content]               사이드카 어댑터가 해석한 쪽지 창 결과
 //   analyze                         열린 받은 쪽지를 로컬 AI로 분석해 검증 결과 출력
 //   semantic                        합성 쪽지로 뜻 검색 점수 분포 확인 (온톡과 무관)
+//   apply --hwnd 0x..               사이드카의 작성창 반영 기능 시험: 시험 문장을 넣고 확인한 뒤 비운다
+//   clip                            클립보드 보존 기능 시험: 떠 두기, 빌려 쓰기, 되돌리기 후 비교
+//   write                           합성 쪽지로 AI 답장 초안 시험 (온톡과 무관)
 //   input --hwnd 0x..               빈 새 쪽지 창에 붙여넣기 시험 (사용자 허락 후에만 실행)
 // input 명령을 빼면 입력·클릭 등 온톡을 조작하는 동작은 하지 않는다.
 //
@@ -43,6 +46,71 @@ if (command == "soak")
         using var self = Process.GetCurrentProcess();
         Console.WriteLine($"ticks={ticks} private={self.PrivateMemorySize64 / 1048576}MB gcHeap={GC.GetTotalMemory(false) / 1048576}MB gen2={GC.CollectionCount(2)}");
     }
+    return 0;
+}
+if (command == "write")
+{
+    var source = new ReceivedNote("홍길동", "주무관 │ 총무과", "10월 2일 오전 09:00", null, 1,
+        "안녕하세요. 총무과 홍길동입니다.\n부서별 보안점검 결과표를 10월 15일까지 제출해 주시기 바랍니다.", []);
+    using var writer = new OllamaWriter();
+    foreach (var instruction in (string[])["기한 내 제출하겠다고 답장", "담당자가 출장 중이라 며칠 늦어진다고 양해를 구하는 답장"])
+    {
+        var sw = Stopwatch.StartNew();
+        var text = writer.WriteAsync(source, "", instruction, CancellationToken.None).GetAwaiter().GetResult();
+        Console.WriteLine($"--- 요청: {instruction} ({sw.Elapsed.TotalSeconds:0.0}초, {NoteBytes.Count(text)} Bytes, 자리 표시 {DraftText.UnfilledPlaceholders(text).Count}개)");
+        Console.WriteLine(text);
+    }
+    return 0;
+}
+if (command == "clip")
+{
+    static string Describe(ClipboardSnapshot s) =>
+        string.Join(", ", s.Describe().Select(i => $"{i.Format}:{i.Bytes}B"));
+
+    var before = ClipboardSnapshot.Capture();
+    if (before is null || before.Incomplete)
+    {
+        Console.WriteLine("중단: 클립보드를 온전히 떠 둘 수 없어 시험하지 않습니다.");
+        return 3;
+    }
+    Console.WriteLine($"전: {Describe(before)}");
+    var borrowed = before.Borrow("클립보드 시험");
+    var restored = before.Restore();
+    var after = ClipboardSnapshot.Capture();
+    Console.WriteLine($"빌려 쓰기={borrowed}, 되돌리기={restored}");
+    Console.WriteLine($"후: {(after is null ? "(열지 못함)" : Describe(after))}");
+    Console.WriteLine(after is not null && before.SameContentAs(after) ? "결과: 내용이 바이트 단위로 같다" : "결과: 달라졌다");
+    return 0;
+}
+if (command == "apply")
+{
+    if (hwndArg is null)
+    {
+        Console.WriteLine("apply 명령에는 --hwnd가 필요합니다.");
+        return 2;
+    }
+    var hwnd = new IntPtr(Convert.ToInt64(hwndArg, 16));
+    var state = ComposeWriter.Read(hwnd);
+    if (state is null)
+    {
+        Console.WriteLine("작성 창이 아닙니다.");
+        return 1;
+    }
+    Console.WriteLine($"시작: 수신 {state.Recipients.Count}명, {state.UsedBytes}/{state.LimitBytes}, SMS={state.SmsChecked}, 대화상자={state.DialogOpen}");
+    if (state.Body.Length > 0)
+    {
+        Console.WriteLine("중단: 본문이 비어 있지 않은 창에는 시험하지 않습니다.");
+        return 3;
+    }
+    const string sample = "안녕하세요.\n반영 시험 문장입니다. ✅\n\n감사합니다.";
+    var conflict = ComposeWriter.ApplyBody(hwnd, sample, "온톡에 없는 내용");
+    Console.WriteLine($"충돌 감지(다른 내용을 기대): {conflict.Status}");
+    var applied = ComposeWriter.ApplyBody(hwnd, sample, "");
+    Console.WriteLine($"반영: {applied.Status}, 표시 {applied.After?.UsedBytes}/{applied.After?.LimitBytes} (계산 {NoteBytes.Count(sample)}), 클립보드 복원={applied.ClipboardRestored}");
+    var same = ComposeWriter.ApplyBody(hwnd, sample, sample);
+    Console.WriteLine($"같은 내용 다시 반영(입력 없이 통과해야 함): {same.Status}");
+    var cleared = ComposeWriter.ApplyBody(hwnd, "", sample);
+    Console.WriteLine($"비우기: {cleared.Status}, 표시 {cleared.After?.UsedBytes}/{cleared.After?.LimitBytes}");
     return 0;
 }
 if (command == "semantic")

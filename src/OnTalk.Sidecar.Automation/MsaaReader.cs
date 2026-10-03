@@ -71,12 +71,22 @@ internal static class MsaaReader
             string tag => tag,
             _ => "?",
         };
+        var bounds = default(AccBounds);
+        try
+        {
+            acc.accLocation(out var x, out var y, out var width, out var height, Self);
+            bounds = new AccBounds(x, y, width, height);
+        }
+        catch
+        {
+            // 화면에 없는 요소는 위치를 주지 않는다.
+        }
         return new AccNode(
             role,
             Safe(() => acc.get_accName(Self)) ?? "",
             Safe(() => acc.get_accValue(Self)) ?? "",
             Safe(() => acc.get_accState(Self)) is int state ? state : 0,
-            children);
+            children) { Bounds = bounds };
     }
 
     private static T? Safe<T>(Func<T> f)

@@ -13,7 +13,7 @@ public sealed record SaveResult(long NoteId, bool IsNew, DateTimeOffset FirstSee
 /// </summary>
 public sealed class ProfileStore : IDisposable
 {
-    private const int SchemaVersion = 3;
+    private const int SchemaVersion = 4;
     private readonly SqliteConnection _db;
 
     public string LoginId { get; }
@@ -147,6 +147,24 @@ public sealed class ProfileStore : IDisposable
                 );
                 CREATE INDEX note_sent ON note(sent_at);
                 PRAGMA user_version = 3;
+                COMMIT;
+                """);
+        }
+        if (version < 4)
+        {
+            Execute(db, """
+                BEGIN;
+                CREATE TABLE draft (
+                    slot       TEXT PRIMARY KEY,
+                    body       TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE template (
+                    id   INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    body TEXT NOT NULL
+                );
+                PRAGMA user_version = 4;
                 COMMIT;
                 """);
         }
@@ -444,6 +462,52 @@ public sealed class ProfileStore : IDisposable
         terms.Count == 0
             ? []
             : GetTasks().Where(t => terms.All(term => t.Title.Contains(term, StringComparison.OrdinalIgnoreCase))).ToList();
+
+    public string? GetDraft(string slot)
+    {
+        using var cmd = Command("SELECT body FROM draft WHERE slot = $slot", ("$slot", slot));
+        return cmd.ExecuteScalar() as string;
+    }
+
+    /// <summary>초안을 저장한다. 빈 초안은 자리를 지운다.</summary>
+    public void SaveDraft(string slot, string body, DateTimeOffset at)
+    {
+        using var cmd = body.Length == 0
+            ? Command("DELETE FROM draft WHERE slot = $slot", ("$slot", slot))
+            : Command("""
+                INSERT INTO draft (slot, body, updated_at) VALUES ($slot, $body, $at)
+                ON CONFLICT(slot) DO UPDATE SET body = $body, updated_at = $at
+                """, ("$slot", slot), ("$body", body), ("$at", at.ToString("O")));
+        cmd.ExecuteNonQuery();
+    }
+
+    public List<Template> GetTemplates()
+    {
+        using var cmd = Command("SELECT id, name, body FROM template ORDER BY name");
+        using var reader = cmd.ExecuteReader();
+        var templates = new List<Template>();
+        while (reader.Read())
+        {
+            templates.Add(new Template(reader.GetInt64(0), reader.GetString(1), reader.GetString(2)));
+        }
+        return templates;
+    }
+
+    /// <summary>같은 이름의 템플릿이 있으면 내용을 바꾼다.</summary>
+    public void SaveTemplate(string name, string body)
+    {
+        using var cmd = Command("""
+            INSERT INTO template (name, body) VALUES ($name, $body)
+            ON CONFLICT(name) DO UPDATE SET body = $body
+            """, ("$name", name), ("$body", body));
+        cmd.ExecuteNonQuery();
+    }
+
+    public void DeleteTemplate(long id)
+    {
+        using var cmd = Command("DELETE FROM template WHERE id = $id", ("$id", id));
+        cmd.ExecuteNonQuery();
+    }
 
     private SqliteCommand Command(string sql, params (string Name, object? Value)[] parameters)
     {

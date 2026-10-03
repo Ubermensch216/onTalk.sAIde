@@ -12,7 +12,22 @@ public enum NoteWindowKind
 }
 
 /// <param name="Note">받은 쪽지를 끝까지 해석했을 때만 값이 있다.</param>
-public sealed record NoteWindowContent(NoteWindowKind Kind, string Title, ReceivedNote? Note);
+/// <param name="Compose">작성 창을 끝까지 해석했을 때만 값이 있다.</param>
+public sealed record NoteWindowContent(NoteWindowKind Kind, string Title, ReceivedNote? Note, ComposeState? Compose = null);
+
+/// <summary>온톡 작성 창(새 쪽지·답장·전달)의 현재 상태.</summary>
+/// <param name="Recipients">수신자 이름. 온톡 작성 창은 이름만 보여 주므로 동명이인은 구분되지 않는다.</param>
+/// <param name="UsedBytes">온톡이 표시한 본문 바이트 수.</param>
+/// <param name="DialogOpen">예약 설정 같은 창 안 대화상자가 떠 있어 본문을 조작할 수 없는 상태.</param>
+/// <param name="BodyBounds">본문 입력창의 화면 위치.</param>
+public sealed record ComposeState(
+    IReadOnlyList<string> Recipients,
+    string Body,
+    int UsedBytes,
+    int LimitBytes,
+    bool SmsChecked,
+    bool DialogOpen,
+    AccBounds BodyBounds);
 
 /// <summary>
 /// 온톡 5.4.3 쪽지 창(windows/note/app.html)의 접근성 트리를 해석한다.
@@ -31,13 +46,44 @@ public static class NoteWindowParser
         var title = root.StaticTexts().FirstOrDefault(t => !ModeToggles.Contains(t)) ?? "";
         if (root.StaticTexts().Any(IsByteCounter))
         {
-            return new NoteWindowContent(NoteWindowKind.Compose, title, null);
+            return new NoteWindowContent(NoteWindowKind.Compose, title, null, ParseCompose(root));
         }
         if (title != ReceivedTitle)
         {
             return new NoteWindowContent(NoteWindowKind.Unknown, title, null);
         }
         return new NoteWindowContent(NoteWindowKind.Received, title, ParseReceived(root, now));
+    }
+
+    private static ComposeState? ParseCompose(AccNode root)
+    {
+        var nodes = root.DescendantsAndSelf().ToList();
+        // 첨부 "추가" 단추도 입력 요소로 나오므로 안내 문구가 있는 것을 본문으로 본다.
+        var bodyIndex = nodes.FindIndex(n => n.Role == AccNode.EditableText && n.Name.Length > 0);
+        var counter = nodes.FirstOrDefault(n => n.Role == AccNode.StaticText && IsByteCounter(n.Name));
+        var addIndex = nodes.FindIndex(n => n.Role == AccNode.StaticText && n.Name == "추가");
+        if (bodyIndex < 0 || counter is null || addIndex < 0 || addIndex > bodyIndex)
+        {
+            return null;
+        }
+        var numbers = counter.Name[..^" Bytes".Length].Split('/');
+        if (numbers.Length != 2 || !int.TryParse(numbers[0], out var used) || !int.TryParse(numbers[1], out var limit))
+        {
+            return null;
+        }
+        // 수신자 이름은 수신 "추가" 단추와 본문 입력창 사이에 나온다.
+        var recipients = nodes.Skip(addIndex + 1).Take(bodyIndex - addIndex - 1)
+            .Where(n => n.Role == AccNode.StaticText && n.Name.Trim().Length > 0)
+            .Select(n => n.Name.Trim()).ToList();
+        var body = nodes[bodyIndex];
+        return new ComposeState(
+            recipients,
+            body.Value.Replace("\r\n", "\n"),
+            used,
+            limit,
+            nodes.Any(n => n.Role == AccNode.CheckBox && n.Name == "SMS 발송" && (n.State & AccNode.StateChecked) != 0),
+            nodes.Any(n => n.Role == AccNode.StaticText && n.Name == "예약 전송 일시"),
+            body.Bounds);
     }
 
     private static ReceivedNote? ParseReceived(AccNode root, DateTimeOffset now)

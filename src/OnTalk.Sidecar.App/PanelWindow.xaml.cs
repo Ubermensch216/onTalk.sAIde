@@ -20,6 +20,7 @@ public partial class PanelWindow : Window
     private readonly NoteWatcher _watcher = new();
     private readonly OllamaAnalyzer _analyzer = new();
     private readonly OllamaEmbedder _embedder = new();
+    private readonly OllamaWriter _writer = new();
     private readonly CancellationTokenSource _closing = new();
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly DispatcherTimer _follow = new() { Interval = TimeSpan.FromMilliseconds(100) };
@@ -43,6 +44,7 @@ public partial class PanelWindow : Window
     private long? _analyzingNoteId;
     private TasksWindow? _tasksWindow;
     private SearchWindow? _searchWindow;
+    private ComposeWindow? _composeWindow;
     private bool _embedding;
 
     public PanelWindow()
@@ -67,6 +69,7 @@ public partial class PanelWindow : Window
             _watcher.Dispose();
             _analyzer.Dispose();
             _embedder.Dispose();
+            _writer.Dispose();
             _store?.Dispose();
         };
     }
@@ -106,6 +109,11 @@ public partial class PanelWindow : Window
             _lastSeenKey.Remove(gone);
             _saved.Remove(gone);
         }
+
+        _composeWindow?.UpdateTargets(snapshot.Notes
+            .Where(n => n.Content.Compose is not null)
+            .Select(n => new ComposeTarget(n.Hwnd, DescribeTarget(n.Content), n.Content.Compose!))
+            .ToList());
 
         var received = snapshot.Notes.Where(n => n.Content.Kind == NoteWindowKind.Received).ToList();
         foreach (var window in received)
@@ -167,6 +175,7 @@ public partial class PanelWindow : Window
         _analysisCancel?.Cancel();
         _tasksWindow?.Close();
         _searchWindow?.Close();
+        _composeWindow?.Close();
         _store?.Dispose();
         _store = null;
         _lastSeenKey.Clear();
@@ -175,6 +184,7 @@ public partial class PanelWindow : Window
         ShowEmpty("");
         TasksButton.IsEnabled = false;
         SearchButton.IsEnabled = false;
+        ComposeButton.IsEnabled = false;
         FooterText.Text = "";
 
         if (candidate is not null && _settings.ConfirmedAccounts.Contains(candidate))
@@ -200,6 +210,7 @@ public partial class PanelWindow : Window
         }
         TasksButton.IsEnabled = true;
         SearchButton.IsEnabled = true;
+        ComposeButton.IsEnabled = true;
         EmbedPending();
         // 앱이 꺼져 있던 동안 지나간 알림을 모아서 보여 준다.
         Dispatcher.BeginInvoke(CheckReminders, DispatcherPriority.ApplicationIdle);
@@ -237,7 +248,7 @@ public partial class PanelWindow : Window
             return;
         }
         var open = _store.GetTasks().Count(t => !t.Done);
-        FooterText.Text = $"보관한 쪽지 {_store.CountNotes()}건 · 열린 업무 {open}건";
+        FooterText.Text = $"쪽지 {_store.CountNotes()} · 할 일 {open}";
     }
 
     private void ShowEmpty(string message)
@@ -445,6 +456,47 @@ public partial class PanelWindow : Window
             _tasksWindow.Show();
         }
         _tasksWindow.Activate();
+    }
+
+    private static string DescribeTarget(NoteWindowContent content)
+    {
+        var compose = content.Compose!;
+        var names = compose.Recipients.Count switch
+        {
+            0 => "수신 없음",
+            <= 2 => $"수신 {string.Join(", ", compose.Recipients)}",
+            _ => $"수신 {compose.Recipients[0]} 외 {compose.Recipients.Count - 1}명",
+        };
+        return $"{content.Title} · {names} · {compose.UsedBytes}/{compose.LimitBytes}";
+    }
+
+    private void OnReplyDraft(object sender, RoutedEventArgs e)
+    {
+        if (_store is not null && _shownNoteId is { } noteId && _store.GetNote(noteId) is { } stored)
+        {
+            OpenCompose(stored);
+        }
+    }
+
+    private void OnNewDraft(object sender, RoutedEventArgs e) => OpenCompose(null);
+
+    private void OpenCompose(StoredNote? source)
+    {
+        if (_store is null)
+        {
+            return;
+        }
+        // 초안 창은 하나만 둔다. 닫을 때 쓰던 초안이 저장된다.
+        _composeWindow?.Close();
+        _composeWindow = new ComposeWindow(_store, _writer, source);
+        _composeWindow.Closed += (s, _) =>
+        {
+            if (ReferenceEquals(s, _composeWindow))
+            {
+                _composeWindow = null;
+            }
+        };
+        _composeWindow.Show();
     }
 
     private void OnOpenSearch(object sender, RoutedEventArgs e)

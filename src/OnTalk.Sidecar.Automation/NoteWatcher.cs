@@ -15,7 +15,6 @@ public sealed record WatchSnapshot(bool OnTalkRunning, IReadOnlyList<NoteWindow>
 public sealed class NoteWatcher : IDisposable
 {
     private const string ProcessName = "온톡";
-    private const string RenderClass = "Chrome_RenderWidgetHostHWND";
     private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(800);
 
     private readonly CancellationTokenSource _stop = new();
@@ -68,7 +67,7 @@ public sealed class NoteWatcher : IDisposable
             Win32.GetWindowThreadProcessId(hwnd, out var pid);
             if (pids.Contains(pid) && Win32.IsWindowVisible(hwnd) && !Win32.IsIconic(hwnd) &&
                 Win32.ClassName(hwnd).StartsWith("Chrome_WidgetWin", StringComparison.Ordinal) &&
-                FindRender(hwnd) is { } render)
+                Win32.FindRenderChild(hwnd) is { } render)
             {
                 candidates.Add((hwnd, render));
             }
@@ -108,21 +107,6 @@ public sealed class NoteWatcher : IDisposable
             }
         }
         return new WatchSnapshot(true, notes);
-    }
-
-    private static IntPtr? FindRender(IntPtr hwnd)
-    {
-        IntPtr? found = null;
-        Win32.EnumChildWindows(hwnd, (child, _) =>
-        {
-            if (Win32.ClassName(child) != RenderClass)
-            {
-                return true;
-            }
-            found = child;
-            return false;
-        }, IntPtr.Zero);
-        return found;
     }
 
     public void Dispose()

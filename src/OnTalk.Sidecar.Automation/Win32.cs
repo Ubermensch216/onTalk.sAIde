@@ -63,6 +63,22 @@ public static class Win32
     internal static extern int AccessibleChildren(
         IAccessible container, int start, int count, [Out] object[] children, out int obtained);
 
+    /// <summary>온톡 창 안에서 웹 화면을 그리는 자식 창. 접근성 트리는 이 창에서 읽는다.</summary>
+    internal static IntPtr? FindRenderChild(IntPtr hwnd)
+    {
+        IntPtr? found = null;
+        EnumChildWindows(hwnd, (child, _) =>
+        {
+            if (ClassName(child) != "Chrome_RenderWidgetHostHWND")
+            {
+                return true;
+            }
+            found = child;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+
     internal static string ClassName(IntPtr hwnd)
     {
         var sb = new StringBuilder(256);
