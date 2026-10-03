@@ -22,6 +22,8 @@ public sealed partial class ProfileStore : IDisposable
     {
         LoginId = loginId;
         _db = db;
+        _dir = dir;
+        _key = key;
         _filesDir = Path.Combine(dir, "files");
         // 파일 암호화에는 DB 키를 그대로 쓰지 않고 거기서 갈라낸 키를 쓴다.
         _fileKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, key, 32, info: "OnTalk.sAIde files"u8.ToArray());
@@ -50,6 +52,7 @@ public sealed partial class ProfileStore : IDisposable
             Execute(db, "PRAGMA foreign_keys = ON");
             Execute(db, "PRAGMA journal_mode = WAL");
             Execute(db, "PRAGMA synchronous = NORMAL");
+            BackUpBeforeMigration(db, dbPath);
             Migrate(db);
         }
         catch
@@ -75,6 +78,22 @@ public sealed partial class ProfileStore : IDisposable
         File.WriteAllBytes(keyPath, ProtectedData.Protect(key, null, DataProtectionScope.CurrentUser));
         return key;
     }
+
+    /// <summary>
+    /// 이전 버전의 저장소를 새 구조로 올리기 전에 사본을 남긴다. 올리다 실패하면 이 사본으로 되돌릴 수 있다.
+    /// 사본도 같은 키로 암호화되어 있다.
+    /// </summary>
+    private static void BackUpBeforeMigration(SqliteConnection db, string dbPath)
+    {
+        var version = Convert.ToInt32(Scalar(db, "PRAGMA user_version"));
+        if (version is > 0 and < SchemaVersion)
+        {
+            Execute(db, "PRAGMA wal_checkpoint(TRUNCATE)");
+            File.Copy(dbPath, $"{dbPath}.v{version}.bak", overwrite: true);
+        }
+    }
+
+    public const int CurrentSchemaVersion = SchemaVersion;
 
     private static void Migrate(SqliteConnection db)
     {

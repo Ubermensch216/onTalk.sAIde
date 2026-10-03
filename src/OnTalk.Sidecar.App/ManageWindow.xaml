@@ -1,0 +1,59 @@
+<Window x:Class="OnTalk.Sidecar.App.ManageWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="관리 · onTalk.sAIde" Width="560" Height="640" MinWidth="460" MinHeight="420"
+        FontFamily="Malgun Gothic" FontSize="13" Background="White" UseLayoutRounding="True"
+        WindowStartupLocation="CenterScreen">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16,14">
+            <TextBlock Text="보관 자료" FontWeight="SemiBold" />
+            <TextBlock x:Name="InfoText" TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,4,0,0" />
+
+            <TextBlock Text="백업" FontWeight="SemiBold" Margin="0,18,0,0" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,4,0,8"
+                       Text="보관 자료는 이 Windows 사용자만 열 수 있게 잠겨 있어 폴더를 복사해서는 다른 PC에서 열 수 없습니다. 백업 파일은 아래 암호로 다시 잠가 만들므로 다른 PC로 옮길 수 있습니다. 암호를 잊으면 백업을 열 수 없습니다." />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition />
+                    <RowDefinition />
+                </Grid.RowDefinitions>
+                <TextBlock Text="백업 암호" VerticalAlignment="Center" Margin="0,0,10,0" />
+                <PasswordBox x:Name="PasswordBox" Grid.Column="1" Padding="4,3" />
+                <TextBlock Grid.Row="1" Text="한 번 더" VerticalAlignment="Center" Margin="0,6,10,0" />
+                <PasswordBox x:Name="PasswordAgain" Grid.Row="1" Grid.Column="1" Padding="4,3" Margin="0,6,0,0" />
+            </Grid>
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                <Button Content="백업 파일 만들기…" Padding="12,3" Click="OnBackup" />
+                <Button Content="백업에서 되살리기…" Padding="12,3" Margin="8,0,0,0" Click="OnRestore" />
+            </StackPanel>
+            <TextBlock x:Name="BackupStatus" TextWrapping="Wrap" Margin="0,8,0,0" />
+
+            <TextBlock Text="발송 기록" FontWeight="SemiBold" Margin="0,18,0,0" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,4,0,6"
+                       Text="이 프로그램의 '전송…'으로 누른 것만 남습니다. 온톡에서 직접 보낸 쪽지는 없습니다." />
+            <TextBlock x:Name="NoDispatchText" Text="기록이 없습니다." Foreground="{StaticResource Muted}" />
+            <ItemsControl x:Name="DispatchList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="0,6">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Headline}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Preview}" Foreground="{StaticResource Muted}" FontSize="12"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Text="모두 지우기" FontWeight="SemiBold" Margin="0,18,0,0" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,4,0,8"
+                       Text="이 계정으로 보관한 쪽지 사본, 업무, 초안, 문구, 그룹, 파일, 검색용 자료를 모두 지웁니다. 되돌릴 수 없습니다. 온톡에 있는 쪽지에는 영향이 없습니다." />
+            <Button Content="이 계정의 보관 자료 모두 지우기…" HorizontalAlignment="Left" Padding="12,3" Click="OnDeleteAll" />
+        </StackPanel>
+    </ScrollViewer>
+</Window>

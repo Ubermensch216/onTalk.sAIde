@@ -11,8 +11,31 @@ public sealed partial class ProfileStore
     private const int TagSize = 16;
     public const long MaxFileBytes = 200L * 1024 * 1024;
 
+    private readonly string _dir;
+    private readonly byte[] _key;
     private readonly string _filesDir;
     private readonly byte[] _fileKey;
+
+    /// <summary>미뤄 둔 기록을 DB 파일에 모두 써 넣고, 백업에 필요한 폴더와 키를 내준다.</summary>
+    internal (string Dir, byte[] Key) PrepareForBackup()
+    {
+        Execute(_db, "PRAGMA wal_checkpoint(TRUNCATE)");
+        return (_dir, _key);
+    }
+
+    /// <summary>
+    /// 한 계정의 보관 자료(쪽지, 업무, 초안, 파일, 키)를 모두 지운다. 그 계정의 저장소가 열려 있으면 먼저 닫아야 한다.
+    /// 온톡에 있는 쪽지에는 영향이 없다.
+    /// </summary>
+    public static void DeleteProfile(string root, string loginId)
+    {
+        var dir = Path.Combine(root, loginId);
+        if (loginId.Length > 0 && loginId.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && !loginId.Contains("..") &&
+            Directory.Exists(dir))
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 
     public List<AttachmentInfo> GetAttachments(long noteId)
     {

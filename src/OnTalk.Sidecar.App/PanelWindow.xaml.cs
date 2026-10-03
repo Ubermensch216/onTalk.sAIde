@@ -45,6 +45,8 @@ public partial class PanelWindow : Window
     private TasksWindow? _tasksWindow;
     private SearchWindow? _searchWindow;
     private ComposeWindow? _composeWindow;
+    private ManageWindow? _manageWindow;
+    private string? _onTalkVersion;
     private bool _embedding;
 
     public PanelWindow()
@@ -78,7 +80,13 @@ public partial class PanelWindow : Window
     private void OnWatcherUpdated(WatchSnapshot snapshot)
     {
         var candidate = snapshot.OnTalkRunning ? OnTalkAccount.DetectCandidate() : null;
-        Dispatcher.BeginInvoke(() => Apply(snapshot, candidate));
+        // 온톡이 스스로 업데이트하면 화면 구성이 바뀔 수 있다. 실행 중인 버전을 한 번 읽어 둔다.
+        var version = snapshot.OnTalkRunning ? _onTalkVersion ?? OnTalkAccount.RunningVersion() : null;
+        Dispatcher.BeginInvoke(() =>
+        {
+            _onTalkVersion = version;
+            Apply(snapshot, candidate);
+        });
     }
 
     private void Apply(WatchSnapshot snapshot, string? candidate)
@@ -102,7 +110,14 @@ public partial class PanelWindow : Window
             return;
         }
 
-        SetStatus($"연결됨 · {_store.LoginId}", "#10B981");
+        if (_onTalkVersion is { } v && !OnTalkAccount.IsVerified(v))
+        {
+            SetStatus($"연결됨 · {_store.LoginId} · 온톡 {v}은(는) 확인하지 않은 버전", "#F59E0B");
+        }
+        else
+        {
+            SetStatus($"연결됨 · {_store.LoginId}", "#10B981");
+        }
         var live = snapshot.Notes.Select(n => n.Hwnd).ToHashSet();
         foreach (var gone in _lastSeenKey.Keys.Where(h => !live.Contains(h)).ToList())
         {
@@ -171,11 +186,26 @@ public partial class PanelWindow : Window
             return;
         }
         // 계정이 바뀌면 이전 계정의 저장소·분석·창을 모두 닫고, 새 계정이 확인되기 전에는 수집하지 않는다.
+        CloseStore();
         _candidateAccount = candidate;
+
+        if (candidate is not null && _settings.ConfirmedAccounts.Contains(candidate))
+        {
+            OpenStore(candidate);
+        }
+        AccountBanner.Visibility = candidate is not null && _store is null ? Visibility.Visible : Visibility.Collapsed;
+        AccountText.Text = $"온톡 계정 '{candidate}'(으)로 로그인한 것으로 보입니다.";
+    }
+
+    /// <summary>열려 있는 저장소와 그 저장소를 쓰는 창을 모두 닫는다. 다음 감시 주기에 계정을 다시 확인해 연다.</summary>
+    private void CloseStore()
+    {
+        _candidateAccount = null;
         _analysisCancel?.Cancel();
         _tasksWindow?.Close();
         _searchWindow?.Close();
         _composeWindow?.Close();
+        _manageWindow?.Close();
         _store?.Dispose();
         _store = null;
         _lastSeenKey.Clear();
@@ -185,14 +215,67 @@ public partial class PanelWindow : Window
         TasksButton.IsEnabled = false;
         SearchButton.IsEnabled = false;
         ComposeButton.IsEnabled = false;
+        ManageButton.IsEnabled = false;
         FooterText.Text = "";
+    }
 
-        if (candidate is not null && _settings.ConfirmedAccounts.Contains(candidate))
+    private void OnOpenManage(object sender, RoutedEventArgs e)
+    {
+        if (_store is null)
         {
-            OpenStore(candidate);
+            return;
         }
-        AccountBanner.Visibility = candidate is not null && _store is null ? Visibility.Visible : Visibility.Collapsed;
-        AccountText.Text = $"온톡 계정 '{candidate}'(으)로 로그인한 것으로 보입니다.";
+        if (_manageWindow is null)
+        {
+            _manageWindow = new ManageWindow(_store, _onTalkVersion, RestoreBackup, DeleteAllData);
+            _manageWindow.Closed += (_, _) => _manageWindow = null;
+            _manageWindow.Show();
+        }
+        _manageWindow.Activate();
+    }
+
+    private void RestoreBackup(string zipPath, string password)
+    {
+        if (_store is not { LoginId: var account })
+        {
+            return;
+        }
+        // 되살리는 동안 저장소를 닫아 둔다. 끝나면 다음 감시 주기에 다시 열린다.
+        CloseStore();
+        try
+        {
+            var result = ProfileBackup.Restore(ProfileStore.DefaultRoot, account, zipPath, password);
+            MessageBox.Show(this,
+                $"백업을 되살렸습니다. 쪽지 {result.Notes}건." +
+                (result.PreviousDataMovedTo is { } moved ? $"\n\n되살리기 전의 자료는 지우지 않고 아래 폴더로 옮겼습니다.\n{moved}" : ""),
+                "onTalk.sAIde");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException
+                                       or Microsoft.Data.Sqlite.SqliteException)
+        {
+            MessageBox.Show(this, $"되살리지 못했습니다. 기존 자료는 그대로입니다.\n{ex.Message}", "onTalk.sAIde");
+        }
+    }
+
+    private void DeleteAllData()
+    {
+        if (_store is not { LoginId: var account })
+        {
+            return;
+        }
+        CloseStore();
+        try
+        {
+            ProfileStore.DeleteProfile(ProfileStore.DefaultRoot, account);
+            // 다시 수집하려면 계정 연결을 새로 확인받는다.
+            _settings.ConfirmedAccounts.Remove(account);
+            _settings.Save();
+            MessageBox.Show(this, $"계정 '{account}'의 보관 자료를 모두 지웠습니다. 온톡의 쪽지에는 영향이 없습니다.", "onTalk.sAIde");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, $"지우지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
+        }
     }
 
     private void OpenStore(string account)
@@ -211,6 +294,7 @@ public partial class PanelWindow : Window
         TasksButton.IsEnabled = true;
         SearchButton.IsEnabled = true;
         ComposeButton.IsEnabled = true;
+        ManageButton.IsEnabled = true;
         EmbedPending();
         // 앱이 꺼져 있던 동안 지나간 알림을 모아서 보여 준다.
         Dispatcher.BeginInvoke(CheckReminders, DispatcherPriority.ApplicationIdle);

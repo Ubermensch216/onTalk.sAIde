@@ -5,6 +5,7 @@ using OnTalk.Probe;
 using OnTalk.Sidecar.AI;
 using OnTalk.Sidecar.Automation;
 using OnTalk.Sidecar.Core;
+using OnTalk.Sidecar.Storage;
 
 // 온톡 연동 진단 도구.
 //   windows                         온톡 프로세스의 최상위 창 목록 (제목은 글자 수만)
@@ -23,6 +24,7 @@ using OnTalk.Sidecar.Core;
 //   reserve --hwnd 0x.. --at "2026-10-05 09:05"   예약 일시를 설정하고 확인한 뒤 취소한다 (전송 없음)
 //   people --hwnd 0x.. --name 이름   받는 사람 추가 창에서 검색만 한다 (선택·전송 없음)
 //   group --hwnd 0x.. --name 이름 --title 직급   그 사람 한 명짜리 그룹을 수신자로 넣는 흐름 시험 (전송 없음)
+//   backupcheck                     실제 보관 자료를 백업해 임시 폴더에 되살려 보고 건수를 비교한다 (원본은 건드리지 않음)
 //   input --hwnd 0x..               빈 새 쪽지 창에 붙여넣기 시험 (사용자 허락 후에만 실행)
 // input 명령을 빼면 입력·클릭 등 온톡을 조작하는 동작은 하지 않는다.
 //
@@ -64,6 +66,40 @@ if (command == "reserve")
     var cancel = ComposeActions.CancelReservation(compose);
     var after = ComposeWriter.Read(compose);
     Console.WriteLine($"취소: {cancel}, 예약 남음={after?.Reservation is not null}, 대화상자={after?.DialogOpen}");
+    return 0;
+}
+if (command == "backupcheck")
+{
+    var account = OnTalkAccount.DetectCandidate();
+    if (account is null || !Directory.Exists(Path.Combine(ProfileStore.DefaultRoot, account)))
+    {
+        Console.WriteLine("보관 자료가 없습니다.");
+        return 1;
+    }
+    var temp = Path.Combine(Path.GetTempPath(), "ontalk-saide-backupcheck-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(temp);
+    try
+    {
+        var zip = Path.Combine(temp, "backup.zip");
+        var password = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(12));
+        int notes, tasks, dispatches;
+        using (var store = ProfileStore.Open(ProfileStore.DefaultRoot, account))
+        {
+            (notes, tasks, dispatches) = (store.CountNotes(), store.GetTasks().Count, store.GetDispatches().Count);
+            var sw = Stopwatch.StartNew();
+            ProfileBackup.Create(store, zip, password);
+            Console.WriteLine($"백업: {new FileInfo(zip).Length / 1024}KB, {sw.ElapsedMilliseconds}ms");
+        }
+        var result = ProfileBackup.Restore(Path.Combine(temp, "restored"), account, zip, password);
+        using var restored = ProfileStore.Open(Path.Combine(temp, "restored"), account);
+        Console.WriteLine($"원본: 쪽지 {notes}, 업무 {tasks}, 발송 기록 {dispatches}");
+        Console.WriteLine($"되살림: 쪽지 {restored.CountNotes()}, 업무 {restored.GetTasks().Count}, 발송 기록 {restored.GetDispatches().Count}");
+        Console.WriteLine(result.Notes == notes && restored.GetTasks().Count == tasks && restored.GetDispatches().Count == dispatches ? "결과: 일치" : "결과: 다름");
+    }
+    finally
+    {
+        Directory.Delete(temp, recursive: true);
+    }
     return 0;
 }
 if (command == "group")
