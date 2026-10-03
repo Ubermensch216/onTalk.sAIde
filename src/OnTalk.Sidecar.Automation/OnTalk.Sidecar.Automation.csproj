@@ -1,0 +1,10 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- Accessibility(IAccessible) 참조용 -->
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OnTalk.Sidecar.Core\OnTalk.Sidecar.Core.csproj" />
+  </ItemGroup>
+</Project>

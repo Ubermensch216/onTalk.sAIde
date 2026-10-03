@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>OnTalk.sAIde</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OnTalk.Sidecar.Automation\OnTalk.Sidecar.Automation.csproj" />
+    <ProjectReference Include="..\OnTalk.Sidecar.Storage\OnTalk.Sidecar.Storage.csproj" />
+  </ItemGroup>
+</Project>

@@ -2,12 +2,14 @@ using System.Diagnostics;
 using System.Text;
 using Accessibility;
 using OnTalk.Probe;
+using OnTalk.Sidecar.Automation;
 
 // 온톡 연동 진단 도구.
 //   windows                         온톡 프로세스의 최상위 창 목록 (제목은 글자 수만)
 //   activate                        접근성 트리 활성화 신호 전송
 //   stats [--hwnd 0x..]             창별 접근성 요소 집계 (이름·본문 미출력)
 //   tree --hwnd 0x.. [--content]    요소 트리 출력. --content가 있을 때만 이름·값 출력
+//   notes [--content]               사이드카 어댑터가 해석한 쪽지 창 결과
 // 입력·클릭 등 온톡을 조작하는 동작은 하지 않는다.
 //
 // Chromium 78은 UIA를 직접 제공하지 않아 UIA 프록시를 거치면 매우 느리다.
@@ -22,6 +24,26 @@ var command = args.Length > 0 ? args[0] : "windows";
 var hwndArg = Option("--hwnd");
 var withContent = args.Contains("--content");
 var maxNodes = int.TryParse(Option("--max"), out var m) ? m : 6000;
+
+if (command == "soak")
+{
+    // 감시 루프의 메모리 사용을 본다.
+    using var watcher = new NoteWatcher();
+    var ticks = 0;
+    watcher.Updated += _ => Interlocked.Increment(ref ticks);
+    watcher.Start();
+    for (var i = 0; i < 12; i++)
+    {
+        Thread.Sleep(2000);
+        using var self = Process.GetCurrentProcess();
+        Console.WriteLine($"ticks={ticks} private={self.PrivateMemorySize64 / 1048576}MB gcHeap={GC.GetTotalMemory(false) / 1048576}MB gen2={GC.CollectionCount(2)}");
+    }
+    return 0;
+}
+if (command == "notes")
+{
+    return Notes();
+}
 
 var windows = FindWindows();
 if (windows.Count == 0)
@@ -58,6 +80,46 @@ switch (command)
     default:
         Console.WriteLine($"알 수 없는 명령: {command}");
         return 2;
+}
+
+int Notes()
+{
+    using var watcher = new NoteWatcher();
+    using var done = new ManualResetEventSlim();
+    WatchSnapshot? snapshot = null;
+    watcher.Updated += s =>
+    {
+        snapshot ??= s;
+        done.Set();
+    };
+    var sw = Stopwatch.StartNew();
+    watcher.Start();
+    if (!done.Wait(TimeSpan.FromSeconds(20)) || snapshot is null)
+    {
+        Console.WriteLine("시간 안에 읽지 못했습니다.");
+        return 1;
+    }
+    Console.WriteLine($"온톡 실행={snapshot.OnTalkRunning}, 쪽지 창 {snapshot.Notes.Count}개, {sw.ElapsedMilliseconds}ms");
+    Console.WriteLine($"계정 후보 확인됨={OnTalkAccount.DetectCandidate() is not null}");
+    foreach (var window in snapshot.Notes)
+    {
+        Console.WriteLine($"== 0x{window.Hwnd.ToInt64():X8} {window.Content.Kind} \"{window.Content.Title}\"");
+        if (window.Content.Note is not { } note)
+        {
+            continue;
+        }
+        Console.WriteLine($"   시각 원문 \"{note.SentAtText}\" -> {note.SentAt?.Value:O} (연도 추정={note.SentAt?.YearInferred})");
+        Console.WriteLine($"   수신 {note.RecipientCount}, 본문 {note.Body.Length}자 {note.Body.Split('\n').Length}줄, 첨부 {note.AttachmentNames.Count}개");
+        if (withContent)
+        {
+            Console.WriteLine($"   발신 \"{note.SenderName}\" / \"{note.SenderDetail}\"");
+            Console.WriteLine($"   첨부 {string.Join(", ", note.AttachmentNames)}");
+            Console.WriteLine("   ---- 본문");
+            Console.WriteLine(note.Body);
+            Console.WriteLine("   ----");
+        }
+    }
+    return 0;
 }
 
 string? Option(string name)
