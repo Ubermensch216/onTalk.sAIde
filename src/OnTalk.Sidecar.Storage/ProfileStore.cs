@@ -13,7 +13,7 @@ public sealed record SaveResult(long NoteId, bool IsNew, DateTimeOffset FirstSee
 /// </summary>
 public sealed class ProfileStore : IDisposable
 {
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
     private readonly SqliteConnection _db;
 
     public string LoginId { get; }
@@ -45,6 +45,8 @@ public sealed class ProfileStore : IDisposable
             // 키는 16진수 원시 키로 넘긴다. 문자열 바인딩이 되지 않는 구문이다.
             Execute(db, $"PRAGMA key = \"x'{Convert.ToHexString(key)}'\"");
             Execute(db, "PRAGMA foreign_keys = ON");
+            Execute(db, "PRAGMA journal_mode = WAL");
+            Execute(db, "PRAGMA synchronous = NORMAL");
             Migrate(db);
         }
         catch
@@ -131,6 +133,20 @@ public sealed class ProfileStore : IDisposable
                 );
                 CREATE INDEX task_note ON task(note_id);
                 PRAGMA user_version = 2;
+                COMMIT;
+                """);
+        }
+        if (version < 3)
+        {
+            Execute(db, """
+                BEGIN;
+                CREATE TABLE embedding (
+                    note_id INTEGER PRIMARY KEY REFERENCES note(id) ON DELETE CASCADE,
+                    model   TEXT NOT NULL,
+                    vector  BLOB NOT NULL
+                );
+                CREATE INDEX note_sent ON note(sent_at);
+                PRAGMA user_version = 3;
                 COMMIT;
                 """);
         }
@@ -297,6 +313,137 @@ public sealed class ProfileStore : IDisposable
         using var cmd = Command("DELETE FROM task WHERE id = $id", ("$id", taskId));
         cmd.ExecuteNonQuery();
     }
+
+    private const string NoteColumns =
+        "n.id, n.sender_name, n.sender_detail, n.sent_at_text, n.sent_at, n.year_inferred, n.recipient_count, n.body, n.first_seen_at";
+
+    public StoredNote? GetNote(long noteId)
+    {
+        using var cmd = Command($"SELECT {NoteColumns} FROM note n WHERE n.id = $id", ("$id", noteId));
+        return ReadNotes(cmd).FirstOrDefault();
+    }
+
+    /// <summary>
+    /// 발신자·본문·첨부 파일명에서 낱말을 찾는다. 낱말은 모두 들어 있어야 하고 대소문자는 구분하지 않는다.
+    /// 한국어는 형태소로 나누지 않고 글자 그대로 찾으므로 두 글자 이름도 찾는다.
+    /// </summary>
+    public List<StoredNote> SearchNotes(NoteQuery query, int limit = 200)
+    {
+        var where = new List<string>();
+        var parameters = new List<(string, object?)> { ("$limit", limit) };
+        for (var i = 0; i < query.Terms.Count; i++)
+        {
+            where.Add($"""
+                ((n.sender_name || ' ' || n.sender_detail || ' ' || n.body) LIKE $t{i} ESCAPE '\'
+                 OR EXISTS (SELECT 1 FROM attachment a WHERE a.note_id = n.id AND a.name LIKE $t{i} ESCAPE '\'))
+                """);
+            var escaped = query.Terms[i].Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_");
+            parameters.Add(($"$t{i}", $"%{escaped}%"));
+        }
+        if (query.Since is { } since)
+        {
+            where.Add("n.sent_at >= $since");
+            parameters.Add(("$since", since.ToOffset(KoreanNoteTime.SeoulOffset).ToString("O")));
+        }
+        if (query.WithAttachmentOnly)
+        {
+            where.Add("EXISTS (SELECT 1 FROM attachment a WHERE a.note_id = n.id)");
+        }
+        using var cmd = Command($"""
+            SELECT {NoteColumns} FROM note n
+            {(where.Count > 0 ? "WHERE " + string.Join(" AND ", where) : "")}
+            ORDER BY COALESCE(n.sent_at, n.first_seen_at) DESC
+            LIMIT $limit
+            """, [.. parameters]);
+        return ReadNotes(cmd);
+    }
+
+    private List<StoredNote> ReadNotes(SqliteCommand cmd)
+    {
+        var notes = new List<StoredNote>();
+        using (var reader = cmd.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                NoteTime? sentAt = reader.IsDBNull(4)
+                    ? null
+                    : new NoteTime(DateTimeOffset.Parse(reader.GetString(4)), reader.GetInt64(5) != 0);
+                notes.Add(new StoredNote(
+                    reader.GetInt64(0),
+                    new ReceivedNote(reader.GetString(1), reader.GetString(2), reader.GetString(3), sentAt,
+                        reader.IsDBNull(6) ? null : reader.GetInt32(6), reader.GetString(7), []),
+                    DateTimeOffset.Parse(reader.GetString(8))));
+            }
+        }
+        for (var i = 0; i < notes.Count; i++)
+        {
+            using var attach = Command("SELECT name FROM attachment WHERE note_id = $id ORDER BY id", ("$id", notes[i].Id));
+            using var reader = attach.ExecuteReader();
+            var names = new List<string>();
+            while (reader.Read())
+            {
+                names.Add(reader.GetString(0));
+            }
+            if (names.Count > 0)
+            {
+                notes[i] = notes[i] with { Note = notes[i].Note with { AttachmentNames = names } };
+            }
+        }
+        return notes;
+    }
+
+    /// <summary>검색이 미치는 범위. 사이드카가 켜진 동안 사용자가 연 쪽지만 들어 있다.</summary>
+    public CollectionRange GetCollectionRange()
+    {
+        using var cmd = Command("SELECT COUNT(*), MIN(first_seen_at) FROM note");
+        using var reader = cmd.ExecuteReader();
+        reader.Read();
+        return new CollectionRange(reader.GetInt32(0), reader.IsDBNull(1) ? null : DateTimeOffset.Parse(reader.GetString(1)));
+    }
+
+    /// <summary>해당 모델의 임베딩이 아직 없는 쪽지.</summary>
+    public List<StoredNote> GetNotesWithoutEmbedding(string model, int limit)
+    {
+        using var cmd = Command($"""
+            SELECT {NoteColumns} FROM note n
+            LEFT JOIN embedding e ON e.note_id = n.id AND e.model = $model
+            WHERE e.note_id IS NULL
+            ORDER BY n.id DESC LIMIT $limit
+            """, ("$model", model), ("$limit", limit));
+        return ReadNotes(cmd);
+    }
+
+    public void SaveEmbedding(long noteId, string model, float[] vector)
+    {
+        var bytes = new byte[vector.Length * sizeof(float)];
+        Buffer.BlockCopy(vector, 0, bytes, 0, bytes.Length);
+        using var cmd = Command("""
+            INSERT INTO embedding (note_id, model, vector) VALUES ($id, $model, $vector)
+            ON CONFLICT(note_id) DO UPDATE SET model = $model, vector = $vector
+            """, ("$id", noteId), ("$model", model), ("$vector", bytes));
+        cmd.ExecuteNonQuery();
+    }
+
+    public List<(long NoteId, float[] Vector)> GetEmbeddings(string model)
+    {
+        using var cmd = Command("SELECT note_id, vector FROM embedding WHERE model = $model", ("$model", model));
+        using var reader = cmd.ExecuteReader();
+        var result = new List<(long, float[])>();
+        while (reader.Read())
+        {
+            var bytes = (byte[])reader[1];
+            var vector = new float[bytes.Length / sizeof(float)];
+            Buffer.BlockCopy(bytes, 0, vector, 0, bytes.Length);
+            result.Add((reader.GetInt64(0), vector));
+        }
+        return result;
+    }
+
+    /// <summary>제목에 낱말이 모두 들어 있는 업무.</summary>
+    public List<TaskItem> SearchTasks(IReadOnlyList<string> terms) =>
+        terms.Count == 0
+            ? []
+            : GetTasks().Where(t => terms.All(term => t.Title.Contains(term, StringComparison.OrdinalIgnoreCase))).ToList();
 
     private SqliteCommand Command(string sql, params (string Name, object? Value)[] parameters)
     {

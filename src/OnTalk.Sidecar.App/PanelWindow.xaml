@@ -39,6 +39,8 @@
 
         <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="12,6">
             <DockPanel>
+                <Button x:Name="SearchButton" DockPanel.Dock="Right" Content="검색" Padding="10,2" Margin="6,0,0,0"
+                        Click="OnOpenSearch" IsEnabled="False" />
                 <Button x:Name="TasksButton" DockPanel.Dock="Right" Content="할 일 목록" Padding="10,2"
                         Click="OnOpenTasks" IsEnabled="False" />
                 <TextBlock x:Name="FooterText" Style="{StaticResource Small}" VerticalAlignment="Center" />

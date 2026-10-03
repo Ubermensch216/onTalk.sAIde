@@ -4,6 +4,7 @@ using Accessibility;
 using OnTalk.Probe;
 using OnTalk.Sidecar.AI;
 using OnTalk.Sidecar.Automation;
+using OnTalk.Sidecar.Core;
 
 // 온톡 연동 진단 도구.
 //   windows                         온톡 프로세스의 최상위 창 목록 (제목은 글자 수만)
@@ -12,6 +13,7 @@ using OnTalk.Sidecar.Automation;
 //   tree --hwnd 0x.. [--content]    요소 트리 출력. --content가 있을 때만 이름·값 출력
 //   notes [--content]               사이드카 어댑터가 해석한 쪽지 창 결과
 //   analyze                         열린 받은 쪽지를 로컬 AI로 분석해 검증 결과 출력
+//   semantic                        합성 쪽지로 뜻 검색 점수 분포 확인 (온톡과 무관)
 //   input --hwnd 0x..               빈 새 쪽지 창에 붙여넣기 시험 (사용자 허락 후에만 실행)
 // input 명령을 빼면 입력·클릭 등 온톡을 조작하는 동작은 하지 않는다.
 //
@@ -40,6 +42,38 @@ if (command == "soak")
         Thread.Sleep(2000);
         using var self = Process.GetCurrentProcess();
         Console.WriteLine($"ticks={ticks} private={self.PrivateMemorySize64 / 1048576}MB gcHeap={GC.GetTotalMemory(false) / 1048576}MB gen2={GC.CollectionCount(2)}");
+    }
+    return 0;
+}
+if (command == "semantic")
+{
+    // 실제 쪽지가 아니라 지어낸 문장이다. 유사도 기준값을 정하려고 점수 분포를 본다.
+    string[] notes =
+    [
+        "감사교육 이수 요청. 감사위원회 직원은 연간 56시간 이상 감사교육을 이수해야 합니다.",
+        "10월 직원 월례조회가 대강당에서 열립니다. 전 직원 참석 바랍니다.",
+        "출장 여비 정산 서류를 이번 주까지 회계팀으로 제출해 주세요.",
+        "청사 주차장 도색 공사로 지하 2층 주차가 제한됩니다.",
+        "정보보안 점검 결과 미조치 PC는 백신 업데이트를 실시하기 바랍니다.",
+        "국정감사 요구자료 제출 요청. 최근 3년간 민원 처리 현황을 작성해 주세요.",
+        "구내식당 메뉴 변경 안내. 금요일 점심은 특식으로 제공됩니다.",
+        "연말정산 간소화 자료 제출 기간 안내드립니다.",
+    ];
+    string[] queries = ["교육 들어야 하는 시간", "차 어디에 세워야 하나", "경비 처리", "밥", "컴퓨터 바이러스", "휴가 신청 방법", "국회 자료"];
+    using var embedder = new OllamaEmbedder();
+    var sw = Stopwatch.StartNew();
+    var vectors = notes.Select((n, i) => ((long)i, embedder.EmbedAsync(n, CancellationToken.None).GetAwaiter().GetResult())).ToList();
+    Console.WriteLine($"쪽지 {notes.Length}건 임베딩 {sw.ElapsedMilliseconds}ms, 차원 {vectors[0].Item2.Length}");
+    foreach (var q in queries)
+    {
+        sw.Restart();
+        var qv = embedder.EmbedAsync(q, CancellationToken.None).GetAwaiter().GetResult();
+        var top = Similarity.Top(qv, vectors, 3, 0f);
+        Console.WriteLine($"\"{q}\" ({sw.ElapsedMilliseconds}ms)");
+        foreach (var (id, score) in top)
+        {
+            Console.WriteLine($"   {score:0.00}  {notes[id][..Math.Min(28, notes[id].Length)]}");
+        }
     }
     return 0;
 }

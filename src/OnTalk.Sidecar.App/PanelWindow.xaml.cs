@@ -19,6 +19,8 @@ public partial class PanelWindow : Window
 
     private readonly NoteWatcher _watcher = new();
     private readonly OllamaAnalyzer _analyzer = new();
+    private readonly OllamaEmbedder _embedder = new();
+    private readonly CancellationTokenSource _closing = new();
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly DispatcherTimer _follow = new() { Interval = TimeSpan.FromMilliseconds(100) };
     private readonly DispatcherTimer _reminders = new() { Interval = TimeSpan.FromMinutes(1) };
@@ -40,6 +42,8 @@ public partial class PanelWindow : Window
     private CancellationTokenSource? _analysisCancel;
     private long? _analyzingNoteId;
     private TasksWindow? _tasksWindow;
+    private SearchWindow? _searchWindow;
+    private bool _embedding;
 
     public PanelWindow()
     {
@@ -59,8 +63,10 @@ public partial class PanelWindow : Window
             _follow.Stop();
             _reminders.Stop();
             _analysisCancel?.Cancel();
+            _closing.Cancel();
             _watcher.Dispose();
             _analyzer.Dispose();
+            _embedder.Dispose();
             _store?.Dispose();
         };
     }
@@ -146,6 +152,7 @@ public partial class PanelWindow : Window
         if (!_saved.ContainsKey(window.Hwnd))
         {
             _saved[window.Hwnd] = _store!.SaveReceived(note, DateTimeOffset.Now);
+            EmbedPending();
         }
     }
 
@@ -159,6 +166,7 @@ public partial class PanelWindow : Window
         _candidateAccount = candidate;
         _analysisCancel?.Cancel();
         _tasksWindow?.Close();
+        _searchWindow?.Close();
         _store?.Dispose();
         _store = null;
         _lastSeenKey.Clear();
@@ -166,6 +174,7 @@ public partial class PanelWindow : Window
         _analysisErrors.Clear();
         ShowEmpty("");
         TasksButton.IsEnabled = false;
+        SearchButton.IsEnabled = false;
         FooterText.Text = "";
 
         if (candidate is not null && _settings.ConfirmedAccounts.Contains(candidate))
@@ -190,6 +199,8 @@ public partial class PanelWindow : Window
             return;
         }
         TasksButton.IsEnabled = true;
+        SearchButton.IsEnabled = true;
+        EmbedPending();
         // 앱이 꺼져 있던 동안 지나간 알림을 모아서 보여 준다.
         Dispatcher.BeginInvoke(CheckReminders, DispatcherPriority.ApplicationIdle);
     }
@@ -434,6 +445,53 @@ public partial class PanelWindow : Window
             _tasksWindow.Show();
         }
         _tasksWindow.Activate();
+    }
+
+    private void OnOpenSearch(object sender, RoutedEventArgs e)
+    {
+        if (_store is null)
+        {
+            return;
+        }
+        if (_searchWindow is null)
+        {
+            _searchWindow = new SearchWindow(_store, _embedder);
+            _searchWindow.Closed += (_, _) => _searchWindow = null;
+            _searchWindow.Show();
+        }
+        _searchWindow.Activate();
+        EmbedPending();
+    }
+
+    /// <summary>뜻 검색용 벡터가 없는 쪽지를 뒤에서 하나씩 채운다. 로컬 AI가 꺼져 있으면 조용히 그만둔다.</summary>
+    private async void EmbedPending()
+    {
+        if (_embedding || _store is not { } store)
+        {
+            return;
+        }
+        _embedding = true;
+        try
+        {
+            while (ReferenceEquals(store, _store) && store.GetNotesWithoutEmbedding(_embedder.Model, 1) is [var next])
+            {
+                var vector = await _embedder.EmbedAsync(OllamaEmbedder.TextOf(next.Note), _closing.Token);
+                // 기다리는 사이 계정이 바뀌었으면 닫힌 저장소에 쓰지 않는다.
+                if (!ReferenceEquals(store, _store))
+                {
+                    break;
+                }
+                store.SaveEmbedding(next.Id, _embedder.Model, vector);
+            }
+        }
+        catch (Exception ex) when (ex is AnalysisUnavailableException or OperationCanceledException)
+        {
+            // 다음에 쪽지를 보관하거나 검색 창을 열 때 다시 시도한다.
+        }
+        finally
+        {
+            _embedding = false;
+        }
     }
 
     private void CheckReminders()
