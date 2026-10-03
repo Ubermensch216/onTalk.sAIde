@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="..\..\src\OnTalk.Sidecar.Automation\OnTalk.Sidecar.Automation.csproj" />
+    <ProjectReference Include="..\..\src\OnTalk.Sidecar.AI\OnTalk.Sidecar.AI.csproj" />
   </ItemGroup>
   <PropertyGroup>
     <OutputType>Exe</OutputType>

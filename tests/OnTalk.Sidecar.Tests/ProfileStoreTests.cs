@@ -96,6 +96,70 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Throws<ArgumentException>(() => ProfileStore.Open(_root, loginId));
     }
 
+    [Fact]
+    public void 업무는_열린_것부터_기한_빠른_순으로_나온다()
+    {
+        using var store = ProfileStore.Open(_root, "user1");
+        var noteId = store.SaveReceived(Note(), Seen).NoteId;
+        var noDue = store.AddTask(null, "기한 없음", null, null, null, Seen);
+        var late = store.AddTask(noteId, "늦은 기한", "근거", "10월 20일", new DateOnly(2026, 10, 20), Seen);
+        var early = store.AddTask(noteId, "이른 기한", null, null, new DateOnly(2026, 10, 5), Seen);
+        var done = store.AddTask(noteId, "끝난 일", null, null, new DateOnly(2026, 10, 1), Seen);
+        store.SetTaskDone(done.Id, true, Seen);
+
+        Assert.Equal([early.Id, late.Id, noDue.Id, done.Id], store.GetTasks().Select(t => t.Id));
+        Assert.Equal([early.Id, late.Id, done.Id], store.GetTasks(noteId).Select(t => t.Id));
+        Assert.Equal(late with { }, store.GetTasks().Single(t => t.Id == late.Id));
+    }
+
+    [Fact]
+    public void 기한을_바꾸면_알림_단계가_되돌아간다()
+    {
+        using var store = ProfileStore.Open(_root, "user1");
+        var task = store.AddTask(null, "제출", null, null, new DateOnly(2026, 10, 5), Seen);
+        store.MarkReminded(task.Id, ReminderRule.DueDay);
+
+        store.SetTaskDue(task.Id, new DateOnly(2026, 10, 9));
+
+        var stored = Assert.Single(store.GetTasks());
+        Assert.Equal(new DateOnly(2026, 10, 9), stored.Due);
+        Assert.Equal(0, stored.RemindedStage);
+    }
+
+    [Fact]
+    public void 분석은_모델과_프롬프트_버전이_같을_때만_재사용한다()
+    {
+        using var store = ProfileStore.Open(_root, "user1");
+        var noteId = store.SaveReceived(Note(), Seen).NoteId;
+        var analysis = new NoteAnalysis("요약",
+            [new ActionCandidate("제출", "근거 문장", "10월 5일", new DateOnly(2026, 10, 5))], ["확인할 점"], 1);
+
+        store.SaveAnalysis(noteId, "model-a", "1", analysis, Seen);
+
+        var loaded = store.GetAnalysis(noteId, "model-a", "1");
+        Assert.NotNull(loaded);
+        Assert.Equal(analysis.Summary, loaded.Summary);
+        Assert.Equal(analysis.Actions, loaded.Actions);
+        Assert.Equal(1, loaded.DroppedActions);
+        Assert.Null(store.GetAnalysis(noteId, "model-b", "1"));
+        Assert.Null(store.GetAnalysis(noteId, "model-a", "2"));
+    }
+
+    [Fact]
+    public void 이전_버전_저장소를_열면_자료를_유지한_채_올린다()
+    {
+        using (var store = ProfileStore.Open(_root, "user1"))
+        {
+            store.SaveReceived(Note(), Seen);
+        }
+
+        using var reopened = ProfileStore.Open(_root, "user1");
+        reopened.AddTask(null, "새 업무", null, null, null, Seen);
+
+        Assert.Equal(1, reopened.CountNotes());
+        Assert.Single(reopened.GetTasks());
+    }
+
     private static bool Contains(byte[] haystack, byte[] needle) => haystack.AsSpan().IndexOf(needle) >= 0;
 
     public void Dispose()

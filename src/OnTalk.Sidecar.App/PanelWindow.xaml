@@ -4,6 +4,17 @@
         Title="onTalk.sAIde" Width="380" Height="700" MinWidth="300" MinHeight="300"
         WindowStyle="ToolWindow" ShowActivated="False" FontFamily="Malgun Gothic" FontSize="13"
         Background="White" UseLayoutRounding="True">
+    <Window.Resources>
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,14,0,6" />
+        </Style>
+        <Style x:Key="Small" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Muted}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+    </Window.Resources>
     <DockPanel>
         <Border DockPanel.Dock="Top" Background="#F3F4F6" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1"
                 Padding="12,8">
@@ -19,7 +30,7 @@
                 BorderThickness="0,0,0,1" Padding="12,10" Visibility="Collapsed">
             <StackPanel>
                 <TextBlock x:Name="AccountText" TextWrapping="Wrap" />
-                <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,4,0,8"
+                <TextBlock Style="{StaticResource Small}" Margin="0,4,0,8"
                            Text="연결하면 이 PC에서 연 쪽지를 계정별 암호화 저장소에 보관합니다. 연결 전에는 아무것도 읽어 저장하지 않습니다." />
                 <Button x:Name="ConfirmButton" Content="이 계정으로 연결" HorizontalAlignment="Left" Padding="12,4"
                         Click="OnConfirmAccount" />
@@ -27,7 +38,11 @@
         </Border>
 
         <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="12,6">
-            <TextBlock x:Name="FooterText" Foreground="{StaticResource Muted}" FontSize="12" />
+            <DockPanel>
+                <Button x:Name="TasksButton" DockPanel.Dock="Right" Content="할 일 목록" Padding="10,2"
+                        Click="OnOpenTasks" IsEnabled="False" />
+                <TextBlock x:Name="FooterText" Style="{StaticResource Small}" VerticalAlignment="Center" />
+            </DockPanel>
         </Border>
 
         <Grid>
@@ -40,26 +55,114 @@
                     <TextBlock x:Name="SenderText" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
                     <TextBlock x:Name="SenderDetailText" Foreground="{StaticResource Muted}" TextWrapping="Wrap" />
                     <TextBlock x:Name="TimeText" Foreground="{StaticResource Muted}" Margin="0,2,0,0" />
-                    <TextBlock x:Name="CaptureText" Foreground="{StaticResource Accent}" Margin="0,6,0,0"
-                               TextWrapping="Wrap" />
+                    <TextBlock x:Name="CaptureText" Style="{StaticResource Small}" Margin="0,4,0,0" />
                 </StackPanel>
 
-                <StackPanel x:Name="AttachmentPanel" DockPanel.Dock="Bottom" Margin="12,8,12,12">
-                    <TextBlock x:Name="AttachmentTitle" FontWeight="SemiBold" Margin="0,0,0,4" />
-                    <ItemsControl x:Name="AttachmentList">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" Margin="0,1" />
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <TextBlock Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"
-                               Text="파일 이름만 기록했습니다. 파일 자체는 아직 확보하지 않습니다." />
-                </StackPanel>
+                <TabControl BorderThickness="0,1,0,0" BorderBrush="{StaticResource Line}" Padding="0">
+                    <TabItem Header="정리" Padding="14,4">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="12,4,12,12">
+                                <StackPanel x:Name="AnalysisStatusPanel" Margin="0,10,0,0">
+                                    <TextBlock x:Name="AnalysisStatusText" TextWrapping="Wrap"
+                                               Foreground="{StaticResource Accent}" />
+                                    <Button x:Name="RetryButton" Content="다시 분석" HorizontalAlignment="Left"
+                                            Padding="10,2" Margin="0,6,0,0" Click="OnRetryAnalysis"
+                                            Visibility="Collapsed" />
+                                </StackPanel>
 
-                <TextBox x:Name="BodyText" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0,1,0,1"
-                         BorderBrush="{StaticResource Line}" Padding="12,10" VerticalScrollBarVisibility="Auto"
-                         Background="#FAFAFA" />
+                                <StackPanel x:Name="SummarySection" Visibility="Collapsed">
+                                    <TextBlock Style="{StaticResource SectionTitle}" Text="요약" />
+                                    <TextBlock x:Name="SummaryText" TextWrapping="Wrap" />
+                                    <TextBlock Style="{StaticResource Small}" Margin="0,4,0,0"
+                                               Text="AI가 쓴 요약입니다. 원문과 다를 수 있으니 중요한 내용은 원문에서 확인하세요." />
+                                </StackPanel>
+
+                                <StackPanel x:Name="CandidateSection" Visibility="Collapsed">
+                                    <TextBlock Style="{StaticResource SectionTitle}" Text="할 일 후보" />
+                                    <TextBlock x:Name="NoCandidateText" Style="{StaticResource Small}"
+                                               Text="이 쪽지에서 해야 할 일을 찾지 못했습니다." />
+                                    <ItemsControl x:Name="CandidateList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="0,0,0,10">
+                                                    <CheckBox IsChecked="{Binding IsChecked}" IsEnabled="{Binding CanRegister}">
+                                                        <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
+                                                    </CheckBox>
+                                                    <TextBlock Text="{Binding DueLine}" Style="{StaticResource Small}"
+                                                               Margin="20,2,0,0" />
+                                                    <TextBlock Text="{Binding EvidenceLine}" Style="{StaticResource Small}"
+                                                               Margin="20,2,0,0" FontStyle="Italic" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock x:Name="DroppedText" Style="{StaticResource Small}" Margin="0,0,0,6"
+                                               Visibility="Collapsed" />
+                                    <Button x:Name="RegisterButton" Content="선택한 항목을 업무로 등록"
+                                            HorizontalAlignment="Left" Padding="10,3" Click="OnRegisterCandidates" />
+                                </StackPanel>
+
+                                <StackPanel x:Name="UncertainSection" Visibility="Collapsed">
+                                    <TextBlock Style="{StaticResource SectionTitle}" Text="확인이 필요한 점" />
+                                    <ItemsControl x:Name="UncertainList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,4" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="이 쪽지의 업무" />
+                                <TextBlock x:Name="NoTaskText" Style="{StaticResource Small}"
+                                           Text="등록한 업무가 없습니다." />
+                                <ItemsControl x:Name="NoteTaskList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Margin="0,0,0,8">
+                                                <CheckBox IsChecked="{Binding Done, Mode=OneWay}" Tag="{Binding Id}"
+                                                          Click="OnToggleTask">
+                                                    <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
+                                                </CheckBox>
+                                                <TextBlock Text="{Binding DueLine}" Style="{StaticResource Small}"
+                                                           Margin="20,2,0,0" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="업무 직접 추가" />
+                                <TextBox x:Name="ManualTitle" Padding="4,3" />
+                                <DockPanel Margin="0,6,0,0">
+                                    <Button DockPanel.Dock="Right" Content="추가" Padding="12,2" Margin="8,0,0,0"
+                                            Click="OnAddManualTask" />
+                                    <DatePicker x:Name="ManualDue" />
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource Small}" Margin="0,4,0,0"
+                                           Text="기한을 정한 업무만 전날 9시와 당일 9시에 알립니다." />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+                    <TabItem Header="원문" Padding="14,4">
+                        <DockPanel>
+                            <StackPanel x:Name="AttachmentPanel" DockPanel.Dock="Bottom" Margin="12,8,12,12">
+                                <TextBlock x:Name="AttachmentTitle" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                <ItemsControl x:Name="AttachmentList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" Margin="0,1" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Style="{StaticResource Small}" Margin="0,4,0,0"
+                                           Text="파일 이름만 기록했습니다. 파일 자체는 아직 확보하지 않습니다." />
+                            </StackPanel>
+                            <TextBox x:Name="BodyText" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0,0,0,1"
+                                     BorderBrush="{StaticResource Line}" Padding="12,10"
+                                     VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
+                        </DockPanel>
+                    </TabItem>
+                </TabControl>
             </DockPanel>
         </Grid>
     </DockPanel>

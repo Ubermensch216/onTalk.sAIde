@@ -13,4 +13,7 @@
     <ProjectReference Include="..\..\src\OnTalk.Sidecar.Automation\OnTalk.Sidecar.Automation.csproj" />
     <ProjectReference Include="..\..\src\OnTalk.Sidecar.Storage\OnTalk.Sidecar.Storage.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\OnTalk.Sidecar.AI\OnTalk.Sidecar.AI.csproj" />
+  </ItemGroup>
 </Project>

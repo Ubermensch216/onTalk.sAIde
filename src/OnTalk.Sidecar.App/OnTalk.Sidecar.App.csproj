@@ -9,5 +9,6 @@
   <ItemGroup>
     <ProjectReference Include="..\OnTalk.Sidecar.Automation\OnTalk.Sidecar.Automation.csproj" />
     <ProjectReference Include="..\OnTalk.Sidecar.Storage\OnTalk.Sidecar.Storage.csproj" />
+    <ProjectReference Include="..\OnTalk.Sidecar.AI\OnTalk.Sidecar.AI.csproj" />
   </ItemGroup>
 </Project>

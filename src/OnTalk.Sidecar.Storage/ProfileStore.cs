@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using OnTalk.Sidecar.Core;
 
@@ -12,7 +13,7 @@ public sealed record SaveResult(long NoteId, bool IsNew, DateTimeOffset FirstSee
 /// </summary>
 public sealed class ProfileStore : IDisposable
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
     private readonly SqliteConnection _db;
 
     public string LoginId { get; }
@@ -105,6 +106,34 @@ public sealed class ProfileStore : IDisposable
                 COMMIT;
                 """);
         }
+        if (version < 2)
+        {
+            Execute(db, """
+                BEGIN;
+                CREATE TABLE analysis (
+                    note_id        INTEGER PRIMARY KEY REFERENCES note(id) ON DELETE CASCADE,
+                    model          TEXT NOT NULL,
+                    prompt_version TEXT NOT NULL,
+                    result_json    TEXT NOT NULL,
+                    created_at     TEXT NOT NULL
+                );
+                CREATE TABLE task (
+                    id             INTEGER PRIMARY KEY,
+                    note_id        INTEGER REFERENCES note(id) ON DELETE SET NULL,
+                    title          TEXT NOT NULL,
+                    evidence       TEXT,
+                    due_text       TEXT,
+                    due_date       TEXT,
+                    done           INTEGER NOT NULL DEFAULT 0,
+                    created_at     TEXT NOT NULL,
+                    done_at        TEXT,
+                    reminded_stage INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX task_note ON task(note_id);
+                PRAGMA user_version = 2;
+                COMMIT;
+                """);
+        }
     }
 
     /// <summary>쪽지를 저장한다. 이미 있는 쪽지면 마지막으로 본 시각만 갱신한다.</summary>
@@ -170,6 +199,115 @@ public sealed class ProfileStore : IDisposable
     }
 
     public int CountNotes() => Convert.ToInt32(Scalar(_db, "SELECT COUNT(*) FROM note"));
+
+    /// <summary>업무 목록에 출처로 보여 줄 쪽지 한 줄 설명.</summary>
+    public string? DescribeNote(long noteId)
+    {
+        using var cmd = Command("SELECT sender_name, COALESCE(substr(sent_at, 1, 10), sent_at_text) FROM note WHERE id = $id",
+            ("$id", noteId));
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? $"{reader.GetString(0)} · {reader.GetString(1)}" : null;
+    }
+
+    /// <summary>같은 모델·프롬프트 버전으로 만든 분석만 돌려준다. 버전이 다르면 다시 분석해야 한다.</summary>
+    public NoteAnalysis? GetAnalysis(long noteId, string model, string promptVersion)
+    {
+        using var cmd = Command(
+            "SELECT result_json FROM analysis WHERE note_id = $id AND model = $model AND prompt_version = $ver",
+            ("$id", noteId), ("$model", model), ("$ver", promptVersion));
+        return cmd.ExecuteScalar() is string json ? JsonSerializer.Deserialize<NoteAnalysis>(json) : null;
+    }
+
+    public void SaveAnalysis(long noteId, string model, string promptVersion, NoteAnalysis analysis, DateTimeOffset at)
+    {
+        using var cmd = Command("""
+            INSERT INTO analysis (note_id, model, prompt_version, result_json, created_at)
+            VALUES ($id, $model, $ver, $json, $at)
+            ON CONFLICT(note_id) DO UPDATE SET model = $model, prompt_version = $ver, result_json = $json, created_at = $at
+            """,
+            ("$id", noteId), ("$model", model), ("$ver", promptVersion),
+            ("$json", JsonSerializer.Serialize(analysis)), ("$at", at.ToString("O")));
+        cmd.ExecuteNonQuery();
+    }
+
+    public TaskItem AddTask(long? noteId, string title, string? evidence, string? dueText, DateOnly? due, DateTimeOffset at)
+    {
+        using var cmd = Command("""
+            INSERT INTO task (note_id, title, evidence, due_text, due_date, created_at)
+            VALUES ($note, $title, $evidence, $dueText, $due, $at)
+            RETURNING id
+            """,
+            ("$note", noteId), ("$title", title), ("$evidence", evidence), ("$dueText", dueText),
+            ("$due", due?.ToString("yyyy-MM-dd")), ("$at", at.ToString("O")));
+        var id = (long)cmd.ExecuteScalar()!;
+        return new TaskItem(id, noteId, title, evidence, dueText, due, false, at, 0);
+    }
+
+    /// <summary>열린 업무가 먼저, 그 안에서는 기한이 빠른 순. 기한 없는 업무는 뒤로 간다.</summary>
+    public List<TaskItem> GetTasks(long? noteId = null)
+    {
+        using var cmd = Command($"""
+            SELECT id, note_id, title, evidence, due_text, due_date, done, created_at, reminded_stage
+            FROM task {(noteId is null ? "" : "WHERE note_id = $note")}
+            ORDER BY done, due_date IS NULL, due_date, id
+            """,
+            ("$note", noteId));
+        using var reader = cmd.ExecuteReader();
+        var tasks = new List<TaskItem>();
+        while (reader.Read())
+        {
+            tasks.Add(new TaskItem(
+                reader.GetInt64(0),
+                reader.IsDBNull(1) ? null : reader.GetInt64(1),
+                reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4),
+                reader.IsDBNull(5) ? null : DateOnly.ParseExact(reader.GetString(5), "yyyy-MM-dd"),
+                reader.GetInt64(6) != 0,
+                DateTimeOffset.Parse(reader.GetString(7)),
+                reader.GetInt32(8)));
+        }
+        return tasks;
+    }
+
+    public void SetTaskDone(long taskId, bool done, DateTimeOffset at)
+    {
+        using var cmd = Command("UPDATE task SET done = $done, done_at = $at WHERE id = $id",
+            ("$done", done ? 1 : 0), ("$at", done ? at.ToString("O") : null), ("$id", taskId));
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>기한을 바꾼다. 새 기한에 맞춰 다시 알리도록 알림 단계를 되돌린다.</summary>
+    public void SetTaskDue(long taskId, DateOnly? due)
+    {
+        using var cmd = Command("UPDATE task SET due_date = $due, reminded_stage = 0 WHERE id = $id",
+            ("$due", due?.ToString("yyyy-MM-dd")), ("$id", taskId));
+        cmd.ExecuteNonQuery();
+    }
+
+    public void MarkReminded(long taskId, int stage)
+    {
+        using var cmd = Command("UPDATE task SET reminded_stage = $stage WHERE id = $id",
+            ("$stage", stage), ("$id", taskId));
+        cmd.ExecuteNonQuery();
+    }
+
+    public void DeleteTask(long taskId)
+    {
+        using var cmd = Command("DELETE FROM task WHERE id = $id", ("$id", taskId));
+        cmd.ExecuteNonQuery();
+    }
+
+    private SqliteCommand Command(string sql, params (string Name, object? Value)[] parameters)
+    {
+        var cmd = _db.CreateCommand();
+        cmd.CommandText = sql;
+        foreach (var (name, value) in parameters)
+        {
+            cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        }
+        return cmd;
+    }
 
     private static void Execute(SqliteConnection db, string sql)
     {

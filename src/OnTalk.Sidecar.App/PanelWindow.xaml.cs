@@ -1,9 +1,12 @@
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using OnTalk.Sidecar.AI;
 using OnTalk.Sidecar.Automation;
 using OnTalk.Sidecar.Core;
 using OnTalk.Sidecar.Storage;
@@ -15,18 +18,28 @@ public partial class PanelWindow : Window
     private const double PanelWidthDip = 380;
 
     private readonly NoteWatcher _watcher = new();
+    private readonly OllamaAnalyzer _analyzer = new();
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly DispatcherTimer _follow = new() { Interval = TimeSpan.FromMilliseconds(100) };
+    private readonly DispatcherTimer _reminders = new() { Interval = TimeSpan.FromMinutes(1) };
     // 창별로 직전 주기에 읽은 쪽지 키. 화면이 그려지는 도중의 불완전한 내용을 저장하지 않으려고
     // 두 주기 연속 같은 내용일 때만 저장한다.
     private readonly Dictionary<IntPtr, string> _lastSeenKey = [];
     private readonly Dictionary<IntPtr, SaveResult> _saved = [];
+    // 분석에 실패한 쪽지. 사용자가 다시 시도하기 전에는 주기마다 재시도하지 않는다.
+    private readonly Dictionary<long, string> _analysisErrors = [];
+    private readonly Stopwatch _analysisClock = new();
 
     private ProfileStore? _store;
     private string? _candidateAccount;
     private IntPtr _attached;
     private IntPtr _self;
     private string? _shownKey;
+    private ReceivedNote? _shownNote;
+    private long? _shownNoteId;
+    private CancellationTokenSource? _analysisCancel;
+    private long? _analyzingNoteId;
+    private TasksWindow? _tasksWindow;
 
     public PanelWindow()
     {
@@ -38,11 +51,16 @@ public partial class PanelWindow : Window
             _watcher.Start();
             _follow.Tick += (_, _) => FollowAttachedWindow();
             _follow.Start();
+            _reminders.Tick += (_, _) => CheckReminders();
+            _reminders.Start();
         };
         Closed += (_, _) =>
         {
             _follow.Stop();
+            _reminders.Stop();
+            _analysisCancel?.Cancel();
             _watcher.Dispose();
+            _analyzer.Dispose();
             _store?.Dispose();
         };
     }
@@ -94,7 +112,7 @@ public partial class PanelWindow : Window
                      ?? received.FirstOrDefault(n => n.Hwnd == _attached)
                      ?? received.FirstOrDefault();
         _attached = target?.Hwnd ?? IntPtr.Zero;
-        FooterText.Text = $"보관한 쪽지 {_store.CountNotes()}건";
+        UpdateFooter();
 
         if (target is null)
         {
@@ -137,13 +155,18 @@ public partial class PanelWindow : Window
         {
             return;
         }
-        // 계정이 바뀌면 이전 계정 저장소를 닫고, 새 계정이 확인되기 전에는 수집하지 않는다.
+        // 계정이 바뀌면 이전 계정의 저장소·분석·창을 모두 닫고, 새 계정이 확인되기 전에는 수집하지 않는다.
         _candidateAccount = candidate;
+        _analysisCancel?.Cancel();
+        _tasksWindow?.Close();
         _store?.Dispose();
         _store = null;
         _lastSeenKey.Clear();
         _saved.Clear();
-        _shownKey = null;
+        _analysisErrors.Clear();
+        ShowEmpty("");
+        TasksButton.IsEnabled = false;
+        FooterText.Text = "";
 
         if (candidate is not null && _settings.ConfirmedAccounts.Contains(candidate))
         {
@@ -164,7 +187,11 @@ public partial class PanelWindow : Window
                                        or System.Security.Cryptography.CryptographicException)
         {
             MessageBox.Show(this, $"저장소를 열지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
+            return;
         }
+        TasksButton.IsEnabled = true;
+        // 앱이 꺼져 있던 동안 지나간 알림을 모아서 보여 준다.
+        Dispatcher.BeginInvoke(CheckReminders, DispatcherPriority.ApplicationIdle);
     }
 
     private void OnConfirmAccount(object sender, RoutedEventArgs e)
@@ -192,9 +219,23 @@ public partial class PanelWindow : Window
         StatusDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
     }
 
+    private void UpdateFooter()
+    {
+        if (_store is null)
+        {
+            return;
+        }
+        var open = _store.GetTasks().Count(t => !t.Done);
+        FooterText.Text = $"보관한 쪽지 {_store.CountNotes()}건 · 열린 업무 {open}건";
+    }
+
     private void ShowEmpty(string message)
     {
         _shownKey = null;
+        _shownNote = null;
+        _shownNoteId = null;
+        // 보고 있던 쪽지가 사라졌으니 그 쪽지의 분석은 더 필요 없다.
+        _analysisCancel?.Cancel();
         EmptyText.Text = message;
         EmptyText.Visibility = Visibility.Visible;
         NoteView.Visibility = Visibility.Collapsed;
@@ -208,27 +249,211 @@ public partial class PanelWindow : Window
         {
             null => "내용 확인 중",
             { IsNew: true } => "새로 보관했습니다",
-            _ => $"이미 보관한 쪽지입니다 (처음 본 시각 {saved.FirstSeenAt.ToLocalTime():yyyy-MM-dd HH:mm})",
+            _ => $"보관한 쪽지 · 처음 본 시각 {saved.FirstSeenAt.ToLocalTime():yyyy-MM-dd HH:mm}",
         };
-        if (_shownKey == note.Key)
+        if (_shownKey != note.Key)
         {
-            // 같은 쪽지를 다시 그리면 사용자가 본문에서 선택·스크롤한 상태가 사라진다.
+            // 같은 쪽지를 다시 그리면 사용자가 본문에서 선택·스크롤한 상태가 사라지므로 바뀔 때만 그린다.
+            _shownKey = note.Key;
+            _shownNote = note;
+            _shownNoteId = null;
+            SenderText.Text = note.SenderName;
+            SenderDetailText.Text = note.SenderDetail;
+            TimeText.Text = note.SentAt switch
+            {
+                null => $"{note.SentAtText} (시각 해석 실패)",
+                { YearInferred: true } t => $"{t.Value:yyyy-MM-dd HH:mm} (연도는 추정)",
+                { } t => $"{t.Value:yyyy-MM-dd HH:mm}",
+            } + (note.RecipientCount is { } count ? $" · 수신 {count}명" : "");
+            BodyText.Text = note.Body;
+            BodyText.ScrollToHome();
+            AttachmentPanel.Visibility = note.AttachmentNames.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            AttachmentTitle.Text = $"첨부 파일 {note.AttachmentNames.Count}개";
+            AttachmentList.ItemsSource = note.AttachmentNames;
+            ManualTitle.Clear();
+            ManualDue.SelectedDate = null;
+        }
+        if (saved is not null && _shownNoteId != saved.NoteId)
+        {
+            _shownNoteId = saved.NoteId;
+            RefreshWork();
+        }
+        if (_analyzingNoteId is not null && _analyzingNoteId == _shownNoteId)
+        {
+            AnalysisStatusText.Text = $"로컬 AI가 쪽지를 정리하는 중입니다 · {_analysisClock.Elapsed.TotalSeconds:0}초";
+        }
+    }
+
+    /// <summary>지금 보이는 쪽지의 분석·업무 영역을 저장소 기준으로 다시 그린다.</summary>
+    private void RefreshWork()
+    {
+        if (_store is null || _shownNoteId is not { } noteId || _shownNote is not { } note)
+        {
             return;
         }
-        _shownKey = note.Key;
-        SenderText.Text = note.SenderName;
-        SenderDetailText.Text = note.SenderDetail;
-        TimeText.Text = note.SentAt switch
+        var now = DateTimeOffset.Now;
+        var tasks = _store.GetTasks(noteId);
+        NoteTaskList.ItemsSource = tasks.Select(t => new TaskRow(t, now)).ToList();
+        NoTaskText.Visibility = tasks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateFooter();
+
+        var analysis = _store.GetAnalysis(noteId, _analyzer.Model, OllamaAnalyzer.PromptVersion);
+        SummarySection.Visibility = analysis is null ? Visibility.Collapsed : Visibility.Visible;
+        CandidateSection.Visibility = SummarySection.Visibility;
+        UncertainSection.Visibility = analysis is { Uncertainties.Count: > 0 } ? Visibility.Visible : Visibility.Collapsed;
+        RetryButton.Visibility = Visibility.Collapsed;
+        AnalysisStatusPanel.Visibility = analysis is null ? Visibility.Visible : Visibility.Collapsed;
+
+        if (analysis is not null)
         {
-            null => $"{note.SentAtText} (시각 해석 실패)",
-            { YearInferred: true } t => $"{t.Value:yyyy-MM-dd HH:mm} (연도는 추정)",
-            { } t => $"{t.Value:yyyy-MM-dd HH:mm}",
-        } + (note.RecipientCount is { } count ? $" · 수신 {count}명" : "");
-        BodyText.Text = note.Body;
-        BodyText.ScrollToHome();
-        AttachmentPanel.Visibility = note.AttachmentNames.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        AttachmentTitle.Text = $"첨부 파일 {note.AttachmentNames.Count}개";
-        AttachmentList.ItemsSource = note.AttachmentNames;
+            SummaryText.Text = analysis.Summary.Length > 0 ? analysis.Summary : "(요약 없음)";
+            var rows = analysis.Actions
+                .Select(a => new CandidateRow(a, tasks.Any(t => t.Title == a.Title)) { IsChecked = false })
+                .ToList();
+            CandidateList.ItemsSource = rows;
+            NoCandidateText.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            RegisterButton.Visibility = rows.Any(r => r.CanRegister) ? Visibility.Visible : Visibility.Collapsed;
+            DroppedText.Visibility = analysis.DroppedActions > 0 ? Visibility.Visible : Visibility.Collapsed;
+            DroppedText.Text = $"원문에서 근거를 찾지 못한 후보 {analysis.DroppedActions}개는 표시하지 않았습니다.";
+            UncertainList.ItemsSource = analysis.Uncertainties;
+        }
+        else if (_analysisErrors.TryGetValue(noteId, out var error))
+        {
+            AnalysisStatusText.Text = $"{error} 요약 없이도 아래에서 업무를 직접 추가할 수 있습니다.";
+            RetryButton.Visibility = Visibility.Visible;
+        }
+        else if (_analyzingNoteId != noteId)
+        {
+            StartAnalysis(note, noteId);
+        }
+    }
+
+    private async void StartAnalysis(ReceivedNote note, long noteId)
+    {
+        // 한 번에 한 쪽지만 분석한다. 다른 쪽지로 넘어가면 앞선 분석은 취소한다.
+        _analysisCancel?.Cancel();
+        var cancel = _analysisCancel = new CancellationTokenSource();
+        _analyzingNoteId = noteId;
+        _analysisClock.Restart();
+        AnalysisStatusText.Text = "로컬 AI가 쪽지를 정리하는 중입니다";
+        var store = _store;
+        try
+        {
+            var sent = DateOnly.FromDateTime(
+                (note.SentAt?.Value ?? DateTimeOffset.Now).ToOffset(KoreanNoteTime.SeoulOffset).DateTime);
+            var analysis = await _analyzer.AnalyzeAsync(note, sent, cancel.Token);
+            // 분석하는 사이 계정이 바뀌었으면 다른 계정 저장소에 쓰지 않는다.
+            if (store is not null && ReferenceEquals(store, _store))
+            {
+                store.SaveAnalysis(noteId, _analyzer.Model, OllamaAnalyzer.PromptVersion, analysis, DateTimeOffset.Now);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (AnalysisUnavailableException ex)
+        {
+            _analysisErrors[noteId] = ex.Message;
+        }
+        finally
+        {
+            if (ReferenceEquals(_analysisCancel, cancel))
+            {
+                _analysisCancel = null;
+                _analyzingNoteId = null;
+            }
+            cancel.Dispose();
+        }
+        if (_shownNoteId == noteId)
+        {
+            RefreshWork();
+        }
+    }
+
+    private void OnRetryAnalysis(object sender, RoutedEventArgs e)
+    {
+        if (_shownNoteId is { } noteId)
+        {
+            _analysisErrors.Remove(noteId);
+            RefreshWork();
+        }
+    }
+
+    private void OnRegisterCandidates(object sender, RoutedEventArgs e)
+    {
+        if (_store is null || _shownNoteId is not { } noteId || CandidateList.ItemsSource is not List<CandidateRow> rows)
+        {
+            return;
+        }
+        foreach (var row in rows.Where(r => r.IsChecked && r.CanRegister))
+        {
+            var c = row.Candidate;
+            _store.AddTask(noteId, c.Title, c.Evidence, c.DueText, c.Due, DateTimeOffset.Now);
+        }
+        RefreshWork();
+        _tasksWindow?.Reload();
+    }
+
+    private void OnAddManualTask(object sender, RoutedEventArgs e)
+    {
+        var title = ManualTitle.Text.Trim();
+        if (_store is null || _shownNoteId is not { } noteId || title.Length == 0)
+        {
+            return;
+        }
+        DateOnly? due = ManualDue.SelectedDate is { } date ? DateOnly.FromDateTime(date) : null;
+        _store.AddTask(noteId, title, null, null, due, DateTimeOffset.Now);
+        ManualTitle.Clear();
+        ManualDue.SelectedDate = null;
+        RefreshWork();
+        _tasksWindow?.Reload();
+    }
+
+    private void OnToggleTask(object sender, RoutedEventArgs e)
+    {
+        if (_store is not null && sender is CheckBox { Tag: long id } box)
+        {
+            _store.SetTaskDone(id, box.IsChecked == true, DateTimeOffset.Now);
+            RefreshWork();
+            _tasksWindow?.Reload();
+        }
+    }
+
+    private void OnOpenTasks(object sender, RoutedEventArgs e) => OpenTasks();
+
+    private void OpenTasks()
+    {
+        if (_store is null)
+        {
+            return;
+        }
+        if (_tasksWindow is null)
+        {
+            _tasksWindow = new TasksWindow(_store, RefreshWork);
+            _tasksWindow.Closed += (_, _) => _tasksWindow = null;
+            _tasksWindow.Show();
+        }
+        _tasksWindow.Activate();
+    }
+
+    private void CheckReminders()
+    {
+        if (_store is null)
+        {
+            return;
+        }
+        var now = DateTimeOffset.Now;
+        var due = _store.GetTasks().Where(t => ReminderRule.IsDue(t, now)).ToList();
+        if (due.Count == 0)
+        {
+            return;
+        }
+        // 창을 띄우기 전에 기록한다. 띄운 뒤 앱이 죽어도 같은 알림이 반복되지 않는다.
+        foreach (var task in due)
+        {
+            _store.MarkReminded(task.Id, ReminderRule.StageReached(task.Due!.Value, now));
+        }
+        new ReminderWindow(due.Select(t => new TaskRow(t, now)).ToList(), OpenTasks).Show();
     }
 
     private void FollowAttachedWindow()
@@ -255,7 +480,7 @@ public partial class PanelWindow : Window
         var x = note.Right + width <= monitor.Work.Right || note.Left - width < monitor.Work.Left
             ? note.Right
             : note.Left - width;
-        if (GetWindowRect(_self, out var current) && current.Left == x && current.Top == note.Top &&
+        if (Win32.GetWindowRect(_self, out var current) && current.Left == x && current.Top == note.Top &&
             current.Width == width && current.Height == note.Height)
         {
             return;
@@ -278,9 +503,6 @@ public partial class PanelWindow : Window
 
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
-
-    [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(IntPtr hwnd, out Win32.Rect rect);
 
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(IntPtr hwnd);

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using Accessibility;
 using OnTalk.Probe;
+using OnTalk.Sidecar.AI;
 using OnTalk.Sidecar.Automation;
 
 // 온톡 연동 진단 도구.
@@ -10,7 +11,9 @@ using OnTalk.Sidecar.Automation;
 //   stats [--hwnd 0x..]             창별 접근성 요소 집계 (이름·본문 미출력)
 //   tree --hwnd 0x.. [--content]    요소 트리 출력. --content가 있을 때만 이름·값 출력
 //   notes [--content]               사이드카 어댑터가 해석한 쪽지 창 결과
-// 입력·클릭 등 온톡을 조작하는 동작은 하지 않는다.
+//   analyze                         열린 받은 쪽지를 로컬 AI로 분석해 검증 결과 출력
+//   input --hwnd 0x..               빈 새 쪽지 창에 붙여넣기 시험 (사용자 허락 후에만 실행)
+// input 명령을 빼면 입력·클릭 등 온톡을 조작하는 동작은 하지 않는다.
 //
 // Chromium 78은 UIA를 직접 제공하지 않아 UIA 프록시를 거치면 매우 느리다.
 // 그래서 MSAA(IAccessible)를 직접 읽는다.
@@ -40,6 +43,39 @@ if (command == "soak")
     }
     return 0;
 }
+if (command == "analyze")
+{
+    using var watcher = new NoteWatcher();
+    using var done = new ManualResetEventSlim();
+    WatchSnapshot? snapshot = null;
+    watcher.Updated += s =>
+    {
+        snapshot ??= s;
+        done.Set();
+    };
+    watcher.Start();
+    done.Wait(TimeSpan.FromSeconds(20));
+    if (snapshot?.Notes.Select(n => n.Content.Note).FirstOrDefault(n => n is not null) is not { } note)
+    {
+        Console.WriteLine("열린 받은 쪽지가 없습니다.");
+        return 1;
+    }
+    using var analyzer = new OllamaAnalyzer();
+    var sw = Stopwatch.StartNew();
+    var sent = DateOnly.FromDateTime((note.SentAt?.Value ?? DateTimeOffset.Now).DateTime);
+    var result = analyzer.AnalyzeAsync(note, sent, CancellationToken.None).GetAwaiter().GetResult();
+    Console.WriteLine($"{analyzer.Model}, {sw.Elapsed.TotalSeconds:0.0}초, 근거 없어 버린 후보 {result.DroppedActions}개");
+    Console.WriteLine($"요약: {result.Summary}");
+    foreach (var a in result.Actions)
+    {
+        Console.WriteLine($"- {a.Title}\n    근거: {a.Evidence.ReplaceLineEndings(" ")}\n    기한: {a.DueText ?? "(원문에 없음)"} -> {a.Due?.ToString("yyyy-MM-dd") ?? "(날짜 없음)"}");
+    }
+    foreach (var u in result.Uncertainties)
+    {
+        Console.WriteLine($"? {u}");
+    }
+    return 0;
+}
 if (command == "notes")
 {
     return Notes();
@@ -66,6 +102,26 @@ switch (command)
             Stats(w);
         }
         return 0;
+    case "input":
+    {
+        if (hwndArg is null || Selected().FirstOrDefault() is not { } target)
+        {
+            Console.WriteLine("input 명령에는 대상 창의 --hwnd가 필요합니다.");
+            return 2;
+        }
+        var code = 0;
+        // 클립보드는 STA 스레드에서만 쓸 수 있다.
+        var sta = new Thread(() => code = InputProbe.Run(target, () =>
+        {
+            var list = new List<Node>();
+            Walk(target, list.Add);
+            return list;
+        }));
+        sta.SetApartmentState(ApartmentState.STA);
+        sta.Start();
+        sta.Join();
+        return code;
+    }
     case "tree":
         if (hwndArg is null)
         {
