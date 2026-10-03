@@ -208,8 +208,12 @@ public partial class ComposeWindow
         {
             case SendStatus.WindowClosed:
                 _store.FinishDispatch(id, DispatchStatus.WindowClosed, "");
-                Result($"전송 단추를 눌렀고 온톡 작성 창이 닫혔습니다({kind}). 상대에게 도착했는지는 여기서 확인하지 못합니다. " +
-                       "온톡 보낸 쪽지함에서 확인하세요. 같은 초안을 다시 보내려면 온톡에서 새 창을 여세요.", ok: true);
+                // 보낸 초안이 남아 있으면 모르고 다시 보낼 수 있다. 본문은 발송 기록에 남아 있다.
+                Editor.Clear();
+                SaveDraft();
+                _picked.Clear();
+                Result($"전송 단추를 눌렀고 온톡 작성 창이 닫혔습니다({kind}). 상대에게 도착했는지는 여기서 확인하지 못하니 " +
+                       "온톡 보낸 쪽지함에서 확인하세요. 보낸 초안은 비웠습니다.", ok: true);
                 break;
             case SendStatus.StillOpen:
                 _store.FinishDispatch(id, DispatchStatus.StillOpen, outcome.Detail);

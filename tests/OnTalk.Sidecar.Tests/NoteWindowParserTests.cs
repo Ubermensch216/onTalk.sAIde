@@ -86,6 +86,28 @@ public class KoreanNoteTimeTests
         Assert.True(time.YearInferred);
     }
 
+    // 온톡은 오늘 받은 쪽지의 시각을 날짜 없이 표시한다.
+    [Theory]
+    [InlineData("오후 03:05", 15, 5)]
+    [InlineData("오전 12:30", 0, 30)]
+    public void 날짜가_없으면_오늘로_본다(string text, int hour, int minute)
+    {
+        var time = KoreanNoteTime.Parse(text, Seoul(2026, 10, 3, 15, 10));
+
+        Assert.Equal(Seoul(2026, 10, 3, hour, minute), time!.Value);
+        Assert.True(time.YearInferred);
+        Assert.True(KoreanNoteTime.LooksLikeTime(text));
+    }
+
+    [Fact]
+    public void 오늘_본_쪽지와_다음_날_본_같은_쪽지는_같은_시각이다()
+    {
+        var today = KoreanNoteTime.Parse("오후 03:05", Seoul(2026, 10, 3, 15, 10));
+        var nextDay = KoreanNoteTime.Parse("10월 3일 오후 03:05", Seoul(2026, 10, 4, 9, 0));
+
+        Assert.Equal(today!.Value, nextDay!.Value);
+    }
+
     [Fact]
     public void 연도가_없고_날짜가_미래면_지난해로_본다()
     {
