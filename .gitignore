@@ -1,0 +1,7 @@
+bin/
+obj/
+.vs/
+*.user
+artifacts/
+# 진단 결과에는 화면 구조·본문이 들어갈 수 있으므로 저장소에 넣지 않는다.
+probe-out/
