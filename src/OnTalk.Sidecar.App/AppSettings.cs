@@ -11,6 +11,15 @@ public sealed class AppSettings
 
     public List<string> ConfirmedAccounts { get; set; } = [];
 
+    /// <summary>패널을 접어 두었는지. 다음 실행 때 같은 모양으로 시작한다.</summary>
+    public bool Collapsed { get; set; }
+
+    /// <summary>요약·할 일 후보·AI 초안에 쓰는 Ollama 모델. 비어 있으면 기본 모델을 쓴다.</summary>
+    public string AnalysisModel { get; set; } = "";
+
+    /// <summary>뜻 검색에 쓰는 Ollama 임베딩 모델. 비어 있으면 기본 모델을 쓴다.</summary>
+    public string EmbeddingModel { get; set; } = "";
+
     public static AppSettings Load()
     {
         try

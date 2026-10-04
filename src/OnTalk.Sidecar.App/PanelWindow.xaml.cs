@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -15,12 +16,20 @@ namespace OnTalk.Sidecar.App;
 
 public partial class PanelWindow : Window
 {
-    private const double PanelWidthDip = 380;
+    private const double PanelWidthDip = 360;
+    private const double PanelHeightDip = 640;
+    private const double PanelMinHeightDip = 380;
+    private const double RailWidthDip = 44;
+    private const double RailHeightDip = 180;
+    // 접힌 도구를 온톡 창 위에 겹쳐 놓을 때 온톡의 창 단추를 가리지 않도록 내려 놓는 거리.
+    private const double RailOverlapInsetDip = 96;
+    private const int HotKeyId = 1;
 
     private readonly NoteWatcher _watcher = new();
-    private readonly OllamaAnalyzer _analyzer = new();
-    private readonly OllamaEmbedder _embedder = new();
-    private readonly OllamaWriter _writer = new();
+    private readonly OnTalkDock _dock = new();
+    private readonly OllamaAnalyzer _analyzer;
+    private readonly OllamaEmbedder _embedder;
+    private readonly OllamaWriter _writer;
     private readonly CancellationTokenSource _closing = new();
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly DispatcherTimer _follow = new() { Interval = TimeSpan.FromMilliseconds(100) };
@@ -37,6 +46,15 @@ public partial class PanelWindow : Window
     private string? _candidateAccount;
     private IntPtr _attached;
     private IntPtr _self;
+    private HwndSource? _source;
+    private TrayIcon? _tray;
+    private IntPtr _dockedTo;
+    private bool _collapsed;
+    // 자리가 없어도 사용자가 직접 펼쳤으면 온톡 창 위에 겹쳐서라도 펼친다.
+    private bool _forceExpanded;
+    // 사용자가 직접 열었으면 온톡을 다시 쓰기 전까지는 다른 앱을 써도 숨기지 않는다.
+    private bool _pinnedOpen = true;
+    private bool? _railShown;
     private string? _shownKey;
     private ReceivedNote? _shownNote;
     private long? _shownNoteId;
@@ -51,14 +69,43 @@ public partial class PanelWindow : Window
 
     public PanelWindow()
     {
+        // 모델은 관리 창에서 바꾸고 다음 실행부터 쓴다. 보관한 분석과 검색용 벡터는 모델별로 따로 남는다.
+        var analysisModel = _settings.AnalysisModel is { Length: > 0 } chosen ? chosen : OllamaModels.DefaultAnalysis;
+        _analyzer = new OllamaAnalyzer(analysisModel);
+        _writer = new OllamaWriter(analysisModel);
+        _embedder = new OllamaEmbedder(_settings.EmbeddingModel is { Length: > 0 } embedding ? embedding : OllamaModels.DefaultEmbedding);
         InitializeComponent();
-        SourceInitialized += (_, _) => _self = new WindowInteropHelper(this).Handle;
+        _collapsed = _settings.Collapsed;
+        var work = SystemParameters.WorkArea;
+        Left = Math.Max(work.Left, work.Right - Width - 12);
+        Top = work.Top + 80;
+        SourceInitialized += (_, _) =>
+        {
+            _self = new WindowInteropHelper(this).Handle;
+            _source = HwndSource.FromHwnd(_self);
+            _source?.AddHook(OnWindowMessage);
+            RegisterHotKey(_self, HotKeyId, ModControl | ModShift | ModNoRepeat, VkSpace);
+            _tray = new TrayIcon(_self);
+            // 알림 영역을 쓸 수 없으면 패널을 숨기지 않으므로 작업 표시줄에서 찾을 수 있게 한다.
+            ShowInTaskbar = !_tray.IsAvailable;
+        };
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape)
+            {
+                Collapse();
+                e.Handled = true;
+            }
+        };
         Loaded += (_, _) =>
         {
             _watcher.Updated += OnWatcherUpdated;
             _watcher.Start();
-            _follow.Tick += (_, _) => FollowAttachedWindow();
+            _follow.Tick += (_, _) => FollowDock();
             _follow.Start();
+            // 온톡이 이미 떠 있으면 처음부터 그 옆에서 시작한다.
+            _dock.Adopt();
+            FollowDock();
             _reminders.Tick += (_, _) => CheckReminders();
             _reminders.Start();
         };
@@ -66,6 +113,12 @@ public partial class PanelWindow : Window
         {
             _follow.Stop();
             _reminders.Stop();
+            if (_self != IntPtr.Zero)
+            {
+                UnregisterHotKey(_self, HotKeyId);
+            }
+            _source?.RemoveHook(OnWindowMessage);
+            _tray?.Dispose();
             _analysisCancel?.Cancel();
             _closing.Cancel();
             _watcher.Dispose();
@@ -194,6 +247,12 @@ public partial class PanelWindow : Window
             OpenStore(candidate);
         }
         AccountBanner.Visibility = candidate is not null && _store is null ? Visibility.Visible : Visibility.Collapsed;
+        if (AccountBanner.Visibility == Visibility.Visible)
+        {
+            // 접혀 있으면 연결 확인을 볼 수 없다.
+            _collapsed = false;
+            _forceExpanded = true;
+        }
         AccountText.Text = $"온톡 계정 '{candidate}'(으)로 로그인한 것으로 보입니다.";
     }
 
@@ -212,10 +271,7 @@ public partial class PanelWindow : Window
         _saved.Clear();
         _analysisErrors.Clear();
         ShowEmpty("");
-        TasksButton.IsEnabled = false;
-        SearchButton.IsEnabled = false;
-        ComposeButton.IsEnabled = false;
-        ManageButton.IsEnabled = false;
+        SetStoreButtons(false);
         FooterText.Text = "";
     }
 
@@ -227,7 +283,7 @@ public partial class PanelWindow : Window
         }
         if (_manageWindow is null)
         {
-            _manageWindow = new ManageWindow(_store, _onTalkVersion, RestoreBackup, DeleteAllData);
+            _manageWindow = new ManageWindow(_store, _settings, _onTalkVersion, RestoreBackup, DeleteAllData);
             _manageWindow.Closed += (_, _) => _manageWindow = null;
             _manageWindow.Show();
         }
@@ -291,13 +347,22 @@ public partial class PanelWindow : Window
             MessageBox.Show(this, $"저장소를 열지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
             return;
         }
-        TasksButton.IsEnabled = true;
-        SearchButton.IsEnabled = true;
-        ComposeButton.IsEnabled = true;
-        ManageButton.IsEnabled = true;
+        SetStoreButtons(true);
         EmbedPending();
         // 앱이 꺼져 있던 동안 지나간 알림을 모아서 보여 준다.
         Dispatcher.BeginInvoke(CheckReminders, DispatcherPriority.ApplicationIdle);
+    }
+
+    private void SetStoreButtons(bool enabled)
+    {
+        foreach (var button in new[]
+                 {
+                     TasksButton, SearchButton, ComposeButton, ManageButton,
+                     RailTasksButton, RailSearchButton, RailManageButton,
+                 })
+        {
+            button.IsEnabled = enabled;
+        }
     }
 
     private void OnConfirmAccount(object sender, RoutedEventArgs e)
@@ -414,26 +479,38 @@ public partial class PanelWindow : Window
         if (analysis is not null)
         {
             SummaryText.Text = analysis.Summary.Length > 0 ? analysis.Summary : "(요약 없음)";
-            var rows = analysis.Actions
-                .Select(a => new CandidateRow(a, tasks.Any(t => t.Title == a.Title)) { IsChecked = false })
-                .ToList();
-            CandidateList.ItemsSource = rows;
-            NoCandidateText.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            RegisterButton.Visibility = rows.Any(r => r.CanRegister) ? Visibility.Visible : Visibility.Collapsed;
-            DroppedText.Visibility = analysis.DroppedActions > 0 ? Visibility.Visible : Visibility.Collapsed;
-            DroppedText.Text = $"원문에서 근거를 찾지 못한 후보 {analysis.DroppedActions}개는 표시하지 않았습니다.";
+            ShowCandidates(analysis, tasks);
             UncertainList.ItemsSource = analysis.Uncertainties;
         }
         else if (_analysisErrors.TryGetValue(noteId, out var error))
         {
-            AnalysisStatusText.Text = $"{error} 요약 없이도 아래에서 업무를 직접 추가할 수 있습니다.";
+            // AI가 없어도 원문 문장 그대로를 후보로 보여 준다. 저장하지 않으므로 AI가 되면 그 결과로 바뀐다.
+            AnalysisStatusText.Text =
+                $"{error} 아래 후보는 AI 없이 원문에서 추린 문장입니다. 할 일이 맞는지 확인한 뒤 등록하세요.";
             RetryButton.Visibility = Visibility.Visible;
+            CandidateSection.Visibility = Visibility.Visible;
+            ShowCandidates(SentenceCandidates.Find(note.Body, SentDate(note)), tasks);
         }
         else if (_analyzingNoteId != noteId)
         {
             StartAnalysis(note, noteId);
         }
     }
+
+    private void ShowCandidates(NoteAnalysis analysis, IReadOnlyList<TaskItem> tasks)
+    {
+        var rows = analysis.Actions
+            .Select(a => new CandidateRow(a, tasks.Any(t => t.Title == a.Title)) { IsChecked = false })
+            .ToList();
+        CandidateList.ItemsSource = rows;
+        NoCandidateText.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        RegisterButton.Visibility = rows.Any(r => r.CanRegister) ? Visibility.Visible : Visibility.Collapsed;
+        DroppedText.Visibility = analysis.DroppedActions > 0 ? Visibility.Visible : Visibility.Collapsed;
+        DroppedText.Text = $"원문에서 근거를 찾지 못한 후보 {analysis.DroppedActions}개는 표시하지 않았습니다.";
+    }
+
+    private static DateOnly SentDate(ReceivedNote note) => DateOnly.FromDateTime(
+        (note.SentAt?.Value ?? DateTimeOffset.Now).ToOffset(KoreanNoteTime.SeoulOffset).DateTime);
 
     private async void StartAnalysis(ReceivedNote note, long noteId)
     {
@@ -446,9 +523,7 @@ public partial class PanelWindow : Window
         var store = _store;
         try
         {
-            var sent = DateOnly.FromDateTime(
-                (note.SentAt?.Value ?? DateTimeOffset.Now).ToOffset(KoreanNoteTime.SeoulOffset).DateTime);
-            var analysis = await _analyzer.AnalyzeAsync(note, sent, cancel.Token);
+            var analysis = await _analyzer.AnalyzeAsync(note, SentDate(note), cancel.Token);
             // 분석하는 사이 계정이 바뀌었으면 다른 계정 저장소에 쓰지 않는다.
             if (store is not null && ReferenceEquals(store, _store))
             {
@@ -717,60 +792,217 @@ public partial class PanelWindow : Window
         new ReminderWindow(due.Select(t => new TaskRow(t, now)).ToList(), OpenTasks).Show();
     }
 
-    private void FollowAttachedWindow()
+    /// <summary>
+    /// 사용자가 쓰고 있는 온톡 창 옆에 붙는다. 온톡도 이 프로그램도 쓰지 않을 때는 숨는다.
+    /// </summary>
+    private void FollowDock()
     {
-        if (_attached == IntPtr.Zero || _self == IntPtr.Zero || WindowState != WindowState.Normal)
+        if (_self == IntPtr.Zero)
         {
-            Topmost = false;
             return;
         }
-        if (!Win32.IsWindow(_attached) || !Win32.IsWindowVisible(_attached) || Win32.IsIconic(_attached) ||
-            !Win32.GetWindowRect(_attached, out var note))
+        var target = _dock.Poll();
+        if (_dock.Target != _dockedTo)
         {
-            Topmost = false;
+            _dockedTo = _dock.Target;
+            _forceExpanded = false;
+        }
+        if (target is { } onTalk && (_dock.OnTalkForeground || _dock.OwnForeground || _pinnedOpen))
+        {
+            if (_dock.OnTalkForeground)
+            {
+                _pinnedOpen = false;
+            }
+            MoveBeside(onTalk);
+            if (!IsVisible)
+            {
+                Show();
+            }
+            // 온톡이나 패널을 쓰고 있을 때만 다른 창 위에 둔다.
+            Topmost = _dock.OnTalkForeground || Win32.GetForegroundWindow() == _self;
             return;
         }
-        // 쪽지 창이나 패널을 쓰고 있을 때만 다른 창 위에 둔다.
-        var foreground = Win32.GetForegroundWindow();
-        Topmost = foreground == _attached || foreground == _self;
 
-        var width = (int)Math.Round(PanelWidthDip * GetDpiForWindow(_attached) / 96.0);
-        var monitor = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
-        GetMonitorInfo(MonitorFromWindow(_attached, MonitorDefaultToNearest), ref monitor);
-        // 오른쪽에 자리가 없으면 왼쪽에 붙인다.
-        var x = note.Right + width <= monitor.Work.Right || note.Left - width < monitor.Work.Left
-            ? note.Right
-            : note.Left - width;
-        if (Win32.GetWindowRect(_self, out var current) && current.Left == x && current.Top == note.Top &&
-            current.Width == width && current.Height == note.Height)
+        Topmost = false;
+        if (target is null)
+        {
+            Float();
+        }
+        if (!_pinnedOpen && !_dock.OwnForeground && _tray is { IsAvailable: true } && IsVisible)
+        {
+            Hide();
+        }
+    }
+
+    private void MoveBeside(DockTarget onTalk)
+    {
+        var scale = onTalk.Scale;
+        var full = DockPlanner.Place(onTalk.Window, onTalk.WorkArea, PanelWidthDip * scale,
+            Math.Max(onTalk.Window.Height, PanelMinHeightDip * scale));
+        // 펼칠 자리가 없으면 접힌 도구만 둔다.
+        var rail = _collapsed || (full.Overlaps && !_forceExpanded);
+        var bounds = rail
+            ? DockPlanner.Place(onTalk.Window, onTalk.WorkArea, RailWidthDip * scale, RailHeightDip * scale,
+                RailOverlapInsetDip * scale).Bounds
+            : full.Bounds;
+        ShowRail(rail);
+
+        var (x, y) = ((int)Math.Round(bounds.X), (int)Math.Round(bounds.Y));
+        var (width, height) = ((int)Math.Round(bounds.Width), (int)Math.Round(bounds.Height));
+        if (Win32.GetWindowRect(_self, out var current) && current.Left == x && current.Top == y &&
+            current.Width == width && current.Height == height)
         {
             return;
         }
-        SetWindowPos(_self, IntPtr.Zero, x, note.Top, width, note.Height, SwpNoZOrder | SwpNoActivate);
+        // 온톡 창을 소유자로 삼지 않는다. 쪽지 창이 닫힐 때 패널이 함께 닫히면 안 된다.
+        SetWindowPos(_self, IntPtr.Zero, x, y, width, height, SwpNoZOrder | SwpNoActivate);
+    }
+
+    /// <summary>붙을 온톡 창이 없을 때의 크기. 있던 자리에 그대로 둔다.</summary>
+    private void Float()
+    {
+        ShowRail(_collapsed);
+        var (width, height) = _collapsed ? (RailWidthDip, RailHeightDip) : (PanelWidthDip, PanelHeightDip);
+        if (Width != width || Height != height)
+        {
+            Width = width;
+            Height = height;
+        }
+    }
+
+    private void ShowRail(bool rail)
+    {
+        if (_railShown == rail)
+        {
+            return;
+        }
+        _railShown = rail;
+        Rail.Visibility = rail ? Visibility.Visible : Visibility.Collapsed;
+        Expanded.Visibility = rail ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void Expand()
+    {
+        _collapsed = false;
+        _forceExpanded = true;
+        SaveCollapsed();
+        FollowDock();
+    }
+
+    private void Collapse()
+    {
+        _collapsed = true;
+        _forceExpanded = false;
+        _pinnedOpen = false;
+        SaveCollapsed();
+        FollowDock();
+    }
+
+    /// <summary>단축키나 알림 영역 아이콘으로 불렀을 때. 숨어 있어도 펼쳐서 보여 준다.</summary>
+    private void Reveal()
+    {
+        _pinnedOpen = true;
+        _dock.Adopt();
+        Expand();
+        if (!IsVisible)
+        {
+            Show();
+        }
+        Activate();
+    }
+
+    private void SaveCollapsed()
+    {
+        if (_settings.Collapsed == _collapsed)
+        {
+            return;
+        }
+        _settings.Collapsed = _collapsed;
+        try
+        {
+            _settings.Save();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 접힘 상태를 기억하지 못할 뿐이다.
+        }
+    }
+
+    private void OnExpand(object sender, RoutedEventArgs e) => Expand();
+
+    private void OnCollapse(object sender, RoutedEventArgs e) => Collapse();
+
+    private void OnExit(object sender, RoutedEventArgs e) => Close();
+
+    private void OnHeaderMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        // 온톡 창에 붙어 있지 않을 때만 끌어서 옮길 수 있다.
+        if (_dock.Target == IntPtr.Zero && e.ButtonState == MouseButtonState.Pressed)
+        {
+            DragMove();
+        }
+    }
+
+    private IntPtr OnWindowMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (message == WmHotKey && wParam.ToInt32() == HotKeyId)
+        {
+            Reveal();
+            handled = true;
+        }
+        else if (message == TrayIcon.CallbackMessage)
+        {
+            switch (lParam.ToInt32() & 0xFFFF)
+            {
+                case WmLButtonUp:
+                    Reveal();
+                    handled = true;
+                    break;
+                case WmRButtonUp:
+                    ShowTrayMenu();
+                    handled = true;
+                    break;
+            }
+        }
+        return IntPtr.Zero;
+    }
+
+    private void ShowTrayMenu()
+    {
+        var menu = new ContextMenu();
+        void Add(string text, Action action, bool enabled = true)
+        {
+            var item = new MenuItem { Header = text, IsEnabled = enabled };
+            item.Click += (_, _) => action();
+            menu.Items.Add(item);
+        }
+        Add("온톡 옆에서 열기", Reveal);
+        Add("할 일 목록", OpenTasks, _store is not null);
+        Add("끝내기", Close);
+        // 메뉴 밖을 눌렀을 때 닫히려면 이 프로그램이 앞에 있어야 한다.
+        SetForegroundWindow(_self);
+        menu.IsOpen = true;
     }
 
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
-    private const uint MonitorDefaultToNearest = 2;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MonitorInfo
-    {
-        public int Size;
-        public Win32.Rect Monitor;
-        public Win32.Rect Work;
-        public uint Flags;
-    }
+    private const int WmHotKey = 0x0312;
+    private const int WmLButtonUp = 0x0202;
+    private const int WmRButtonUp = 0x0205;
+    private const uint ModControl = 0x0002;
+    private const uint ModShift = 0x0004;
+    private const uint ModNoRepeat = 0x4000;
+    private const uint VkSpace = 0x20;
 
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
     [DllImport("user32.dll")]
-    private static extern uint GetDpiForWindow(IntPtr hwnd);
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
 
     [DllImport("user32.dll")]
-    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+    private static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
 
     [DllImport("user32.dll")]
-    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+    private static extern bool UnregisterHotKey(IntPtr hwnd, int id);
 }

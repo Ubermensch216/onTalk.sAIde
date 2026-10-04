@@ -48,6 +48,30 @@ public static class Win32
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
 
+    internal const uint MONITOR_DEFAULTTONEAREST = 2;
+    internal const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MonitorInfo
+    {
+        public int Size;
+        public Rect Monitor;
+        public Rect Work;
+        public uint Flags;
+    }
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll")]
+    internal static extern bool GetMonitorInfoW(IntPtr monitor, ref MonitorInfo info);
+
+    [DllImport("user32.dll")]
+    internal static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    [DllImport("dwmapi.dll")]
+    internal static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out Rect value, int size);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetClassNameW(IntPtr hwnd, StringBuilder sb, int max);
 

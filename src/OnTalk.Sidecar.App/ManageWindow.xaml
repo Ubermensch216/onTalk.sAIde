@@ -32,6 +32,30 @@
             </StackPanel>
             <TextBlock x:Name="BackupStatus" TextWrapping="Wrap" Margin="0,8,0,0" />
 
+            <TextBlock Text="로컬 AI 모델" FontWeight="SemiBold" Margin="0,18,0,0" />
+            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,4,0,8"
+                       Text="이 PC의 Ollama에 설치된 모델 가운데 고릅니다. 바꾼 모델은 프로그램을 다시 켠 뒤부터 쓰고, 그 모델로 쪽지 정리와 검색용 자료를 새로 만듭니다." />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition />
+                    <RowDefinition />
+                </Grid.RowDefinitions>
+                <TextBlock Text="정리·초안" VerticalAlignment="Center" Margin="0,0,10,0" />
+                <ComboBox x:Name="AnalysisModelBox" Grid.Column="1" IsEditable="True" Padding="4,3" />
+                <TextBlock Grid.Row="1" Text="뜻 검색" VerticalAlignment="Center" Margin="0,6,10,0" />
+                <ComboBox x:Name="EmbeddingModelBox" Grid.Row="1" Grid.Column="1" IsEditable="True" Padding="4,3"
+                          Margin="0,6,0,0" />
+            </Grid>
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                <Button x:Name="ListModelsButton" Content="설치된 모델 확인" Padding="12,3" Click="OnListModels" />
+                <Button Content="모델 저장" Padding="12,3" Margin="8,0,0,0" Click="OnSaveModels" />
+            </StackPanel>
+            <TextBlock x:Name="ModelStatus" TextWrapping="Wrap" Margin="0,8,0,0" />
+
             <TextBlock Text="발송 기록" FontWeight="SemiBold" Margin="0,18,0,0" />
             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,4,0,6"
                        Text="이 프로그램의 '전송…'으로 누른 것만 남습니다. 온톡에서 직접 보낸 쪽지는 없습니다." />

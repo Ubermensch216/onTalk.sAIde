@@ -2,6 +2,7 @@ using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Media;
+using OnTalk.Sidecar.AI;
 using OnTalk.Sidecar.Core;
 using OnTalk.Sidecar.Storage;
 
@@ -24,17 +25,21 @@ public sealed class DispatchRow(DispatchRecord record)
     public string Preview { get; } = record.Body.ReplaceLineEndings(" ");
 }
 
-/// <summary>백업·되살리기·삭제와 발송 기록. 계정이 바뀌면 패널이 이 창을 닫는다.</summary>
+/// <summary>백업·되살리기·삭제, 로컬 AI 모델 선택과 발송 기록. 계정이 바뀌면 패널이 이 창을 닫는다.</summary>
 public partial class ManageWindow : Window
 {
     private readonly ProfileStore _store;
+    private readonly AppSettings _settings;
     private readonly Action<string, string> _restore;
     private readonly Action _deleteAll;
 
-    public ManageWindow(ProfileStore store, string? onTalkVersion, Action<string, string> restore, Action deleteAll)
+    public ManageWindow(ProfileStore store, AppSettings settings, string? onTalkVersion, Action<string, string> restore, Action deleteAll)
     {
         InitializeComponent();
         _store = store;
+        _settings = settings;
+        AnalysisModelBox.Text = settings.AnalysisModel is { Length: > 0 } analysis ? analysis : OllamaModels.DefaultAnalysis;
+        EmbeddingModelBox.Text = settings.EmbeddingModel is { Length: > 0 } embedding ? embedding : OllamaModels.DefaultEmbedding;
         _restore = restore;
         _deleteAll = deleteAll;
         var range = store.GetCollectionRange();
@@ -53,6 +58,57 @@ public partial class ManageWindow : Window
     {
         BackupStatus.Text = text;
         BackupStatus.Foreground = ok ? (Brush)Application.Current.Resources["Accent"] : Brushes.Firebrick;
+    }
+
+    private async void OnListModels(object sender, RoutedEventArgs e)
+    {
+        ListModelsButton.IsEnabled = false;
+        try
+        {
+            var models = await OllamaModels.ListAsync(CancellationToken.None);
+            // 목록을 바꾸면 적어 둔 값이 지워지므로 다시 넣는다.
+            var (analysis, embedding) = (AnalysisModelBox.Text, EmbeddingModelBox.Text);
+            AnalysisModelBox.ItemsSource = models;
+            EmbeddingModelBox.ItemsSource = models;
+            (AnalysisModelBox.Text, EmbeddingModelBox.Text) = (analysis, embedding);
+            ModelStatus.Foreground = (Brush)Application.Current.Resources["Muted"];
+            ModelStatus.Text = models.Count == 0
+                ? "Ollama에 설치된 모델이 없습니다."
+                : $"설치된 모델 {models.Count}개를 목록에 넣었습니다.";
+        }
+        catch (AnalysisUnavailableException ex)
+        {
+            ModelStatus.Foreground = Brushes.Firebrick;
+            ModelStatus.Text = ex.Message;
+        }
+        finally
+        {
+            ListModelsButton.IsEnabled = true;
+        }
+    }
+
+    private void OnSaveModels(object sender, RoutedEventArgs e)
+    {
+        var (analysis, embedding) = (AnalysisModelBox.Text.Trim(), EmbeddingModelBox.Text.Trim());
+        if (analysis.Length == 0 || embedding.Length == 0)
+        {
+            ModelStatus.Foreground = Brushes.Firebrick;
+            ModelStatus.Text = "두 모델 이름을 모두 적어 주세요.";
+            return;
+        }
+        _settings.AnalysisModel = analysis;
+        _settings.EmbeddingModel = embedding;
+        try
+        {
+            _settings.Save();
+            ModelStatus.Foreground = (Brush)Application.Current.Resources["Accent"];
+            ModelStatus.Text = "저장했습니다. 프로그램을 다시 켜면 이 모델을 씁니다.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ModelStatus.Foreground = Brushes.Firebrick;
+            ModelStatus.Text = $"저장하지 못했습니다. {ex.Message}";
+        }
     }
 
     private void OnBackup(object sender, RoutedEventArgs e)
