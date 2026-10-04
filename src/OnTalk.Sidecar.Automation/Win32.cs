@@ -40,6 +40,9 @@ public static class Win32
     public static extern bool IsWindowVisible(IntPtr hwnd);
 
     [DllImport("user32.dll")]
+    internal static extern bool IsWindowEnabled(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
     public static extern bool IsIconic(IntPtr hwnd);
 
     [DllImport("user32.dll")]

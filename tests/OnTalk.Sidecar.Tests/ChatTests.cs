@@ -75,6 +75,38 @@ public sealed class ChatTests
     }
 
     [Fact]
+    public void MSAA_표시_컨테이너_안의_본문을_읽고_입력_하위_글은_제외한다()
+    {
+        var body = new AccNode(AccNode.ContentText, "", "", 0, [Text("첫째 줄\n둘째 줄 ✅")]);
+        var input = new AccNode(AccNode.EditableText, "", "비공개 초안", 0x100000, [Text("입력 중인 글")]);
+        var snapshot = ChatWindowParser.Parse(ChatTree(Text("예시 상대"), Text("2026년 10월 4일 일"),
+            Text("오전 10:00"), body, Text("오전 10:01"), input, Text("전송")), Now)!;
+        Assert.Equal("첫째 줄\n둘째 줄 ✅", Assert.Single(snapshot.Messages).Body);
+    }
+    [Fact]
+    public void MSAA_컨테이너_미리보기를_읽고_빈_표시_프로필은_제외한다()
+    {
+        var row = new AccNode(AccNode.ListItem,"","",0,[Div(Text("예시 방")),Div(Text("3"))]);
+        var preview = new AccNode(AccNode.ContentText,"","",0,[Text("합성 미리보기")]);
+        var root = Document("file:///x/windows/renderer/app.html#/chatrooms", [new AccNode("list","","",0,[row,preview]),
+            new AccNode("list","","",0,[row with { Path="empty" },preview with { Children=[] }])]);
+        var items = ChatWindowParser.ParseList(root);
+        Assert.Equal("합성 미리보기",Assert.Single(items).Preview);
+    }
+    [Theory]
+    [InlineData(0,true)]
+    [InlineData(0x100000,false)]
+    [InlineData(0x8000,false)]
+    [InlineData(1,false)]
+    [InlineData(0x200000,false)]
+    public void MSAA_입력가능_숨김_비활성_암호_요소를_표시_본문으로_분류하지_않는다(int state,bool expected) =>
+        Assert.Equal(expected,MsaaReader.IsDisplayText(AccNode.EditableText,state));
+
+    [Fact]
+    public void 잘못된_시각을_메시지_경계로_삼지_않는다() => Assert.Empty(ChatWindowParser.Parse(ChatTree(
+        Text("2026년 10월 4일 일"),Text("오후 99:99"),Text("합성 글")),Now)!.Messages);
+
+    [Fact]
     public void 메시지가_추가되면_세션은_유지하고_같은_제목의_다른_범위는_새로_구분한다()
     {
         var tracker = new WindowSessionTracker(); var context = new SidecarContext(OnTalkSurface.Chat);

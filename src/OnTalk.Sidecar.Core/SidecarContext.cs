@@ -23,7 +23,7 @@ public static class SidecarPolicy
         OnTalkSurface.NoteRead => new(context.Title.Length > 0 ? context.Title : "쪽지 읽기", "내용과 요청을 이해하고 원문 근거를 확인하세요.",
             "요약 · 요청/기한 · 원문 · 첨부 · 연결 업무", "현재 열린 쪽지만 표시합니다."),
         OnTalkSurface.Chat => new("대화 지원", "최근 흐름을 파악하고 짧은 답변을 준비하세요.",
-            "원문 선택 · 흐름/후보 정리 · 짧은 답변 · 근거 업무", "읽힌 텍스트 범위를 직접 선택합니다. 새 자료는 다시 불러옵니다. 초안은 복사하고 온톡에서 직접 붙여 넣으세요."),
+            "원문 선택 · 흐름/후보 정리 · 짧은 답변 · 초안 복사 · 근거 업무", "읽힌 텍스트 범위를 직접 선택합니다. 새 자료는 다시 불러옵니다. 온톡에서 실제 상대와 초안을 확인한 뒤 전송은 직접 합니다."),
         OnTalkSurface.Main => context.Menu switch
         {
             MainMenu.Friends => new("친구 · 연락 준비", "자주 연락하는 사람과 그룹을 기준으로 업무 연락을 준비하세요.",

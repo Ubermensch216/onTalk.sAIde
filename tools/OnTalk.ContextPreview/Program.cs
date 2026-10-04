@@ -21,14 +21,15 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        if (args is ["--inspect", var target] && long.TryParse(target, out var handle))
+        if (args is ["--inspect", var target] && (target == "follow" || long.TryParse(target, out _)))
         {
-            var inspector = new Application(); inspector.Run(new LiveContextWindow(new IntPtr(handle))); return 0;
+            var inspector = new Application(); inspector.Run(new LiveContextWindow(target == "follow" ? IntPtr.Zero : new IntPtr(long.Parse(target)))); return 0;
         }
         var output = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/context-preview");
         Directory.CreateDirectory(output);
         RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
         var app = new Application();
+        SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
         app.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/OnTalk.sAIde;component/Theme.xaml", UriKind.Relative)));
         using var store = ProfileStore.Open(Path.Combine(output, "synthetic-profile"), "preview");
         store.SaveGroup("예시 업무 그룹", [new Recipient("예시 담당자", "주무관", ["예시기관 총무팀"]) ]);
@@ -161,7 +162,7 @@ internal static class Program
         helper.Close();
         VerifyChat(store, output);
         panel.Close();
-        Console.WriteLine($"PASS: 기본 {cases.Length}개 문맥, 사람 선택 {peopleCases.Length}종, 작성 도우미 2종, 대화 4개 탭 · 52개 이미지 · 선택/원문 고정/업무 근거/제안 수락·만료 검사. {output}");
+        Console.WriteLine($"PASS: 기본 {cases.Length}개 문맥, 사람 선택 {peopleCases.Length}종, 작성 도우미 2종, 대화 4개 탭 · {Directory.GetFiles(output, "*.png").Length}개 이미지 · 선택/원문 고정/입력 비교·충돌·만료/업무 근거/제안 수락 검사. {output}");
         return 0;
     }
 
@@ -175,7 +176,8 @@ internal static class Program
             new("preview-chat:2", "예시 상대", "오전 10:01", new DateOnly(2026,10,4), "제출 날짜는 아직 협의 중입니다."),
             new("preview-chat:3", "발신자 미확인", "오전 10:02", new DateOnly(2026,10,4), "자료 양식은 어디에 있나요?")], DateTimeOffset.Now);
         var changed = 0;
-        using var pane = new ChatPane(store, analyzer, writer, session, snapshot, () => changed++);
+        var input = new PreviewChatInput(snapshot);
+        using var pane = new ChatPane(store, analyzer, writer, session, snapshot, () => changed++, input);
         pane.SetActive(true); Invoke(pane, "SelectRecent");
         var editor = (TextBox)Get(pane, "_editor"); editor.Text = "제출 날짜를 확인한 뒤 답변드릴게요.";
         pane.Refresh(snapshot with { Messages = [.. snapshot.Messages, new("preview-chat:4", "예시 상대", "오전 10:03", snapshot.Messages[0].Date, "추가로 확인할 내용이 있습니다.")] });
@@ -212,8 +214,64 @@ internal static class Program
             Render((FrameworkElement)pane.Content,Path.Combine(output,$"chat-tab-{i}.png"),360,800);
             Render((FrameworkElement)pane.Content,Path.Combine(output,$"chat-tab-{i}-short.png"),360,480);
         }
+        tabs.SelectedIndex = 2;
+        Finish((Task)Call(pane, "ReviewInputAsync"));
+        if (input.Writes != 0 || ((StackPanel)Get(pane, "_inputReview")).Visibility != Visibility.Visible) throw new InvalidOperationException("입력 비교가 글을 쓰거나 비교를 표시하지 않았습니다.");
+        RenderReply("chat-input-review.png",800);
+        RenderReply("chat-input-review-short.png",480);
+        RenderReply("chat-input-review-125.png",800,1.25);
+        RenderReply("chat-input-review-150.png",800,1.5);
+        Finish((Task)Call(pane,"ApplyInputAsync")); if(input.Writes != 0) throw new InvalidOperationException("확인 없이 입력을 반영했습니다.");
+        ((CheckBox)Get(pane,"_inputConfirmed")).IsChecked=true; input.Current=input.Current with { Body="온톡에서 직접 편집한 글" };
+        Finish((Task)Call(pane,"ApplyInputAsync")); if(input.Writes != 0 || !((TextBlock)Get(pane,"_status")).Text.Contains("바뀌어")) throw new InvalidOperationException("입력 충돌 처리 실패");
+        Render((FrameworkElement)pane.Content,Path.Combine(output,"chat-input-conflict.png"),360,800);
+        Render((FrameworkElement)pane.Content,Path.Combine(output,"chat-input-conflict-short.png"),360,480);
+        Finish((Task)Call(pane,"ReviewInputAsync")); ((CheckBox)Get(pane,"_inputConfirmed")).IsChecked=true;
+        editor.Text="비교 이후 고친 글"; Finish((Task)Call(pane,"ApplyInputAsync")); if(input.Writes != 0) throw new InvalidOperationException("변경한 초안에 이전 비교를 적용했습니다.");
+        input.Gate=new TaskCompletionSource<ChatInputState?>();
+        var lateRead=(Task)Call(pane,"ReviewInputAsync"); editor.Text="입력 읽기 중에 고친 글"; input.Gate.SetResult(input.Current); Finish(lateRead); input.Gate=null;
+        if(((StackPanel)Get(pane,"_inputReview")).Visibility==Visibility.Visible) throw new InvalidOperationException("늦은 입력 읽기 결과를 표시했습니다.");
+        Finish((Task)Call(pane,"ReviewInputAsync"));
+        input.Gate=new TaskCompletionSource<ChatInputState?>(); input.Gate.SetResult(null); Finish((Task)Call(pane,"ReviewInputAsync")); input.Gate=null;
+        if(((StackPanel)Get(pane,"_inputReview")).Visibility==Visibility.Visible || GetNullable(pane,"_inputTicket") is not null) throw new InvalidOperationException("입력 재검사 실패 후 이전 비교가 남았습니다.");
+        Set(pane,"_inputReadWait",TimeSpan.FromMilliseconds(40));
+        input.Gate=new TaskCompletionSource<ChatInputState?>(); var reads=input.Reads;
+        Finish((Task)Call(pane,"ReviewInputAsync"));
+        if ((bool)Get(pane,"_busy") || GetNullable(pane,"_inputTicket") is not null) throw new InvalidOperationException("입력 읽기 시간 초과 후 UI/비교가 잠겼습니다.");
+        Finish((Task)Call(pane,"ReviewInputAsync")); Finish((Task)Call(pane,"ImportInputAsync"));
+        if (input.Reads != reads + 1) throw new InvalidOperationException("느린 입력 읽기를 중복 시작했습니다.");
+        input.Gate.SetResult(input.Current); Finish((Task)Get(pane,"_pendingInputRead")); input.Gate=null;
+        if (GetNullable(pane,"_inputTicket") is not null || input.Writes != 0) throw new InvalidOperationException("시간 초과 뒤 늦은 결과를 반영했습니다.");
+        Set(pane,"_inputReadWait",TimeSpan.FromSeconds(10));
+        Finish((Task)Call(pane,"ReviewInputAsync")); ((CheckBox)Get(pane,"_inputConfirmed")).IsChecked=true;
+        Finish((Task)Call(pane,"ApplyInputAsync")); if(input.Writes != 1 || input.Current.Body != pane.Draft) throw new InvalidOperationException("확인한 입력 반영 실패");
+        editor.Clear(); Finish((Task)Call(pane,"ImportInputAsync")); if(pane.Draft != input.Current.Body) throw new InvalidOperationException("입력 글 가져오기 실패");
+        ((Button)Get(pane,"_undo")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); if(pane.Draft.Length != 0) throw new InvalidOperationException("가져온 입력 글 되돌리기 실패");
+        editor.Text="직접 고친 최신 글";
+        Finish((Task)Call(pane,"ReviewInputAsync")); ((CheckBox)Get(pane,"_inputConfirmed")).IsChecked=true;
         pane.SetActive(false); Invoke(pane,"AcceptProposal"); if(pane.Draft != "직접 고친 최신 글") throw new InvalidOperationException("비활성 대화 초안 변경");
+        Finish((Task)Call(pane,"ApplyInputAsync")); if(input.Writes != 1) throw new InvalidOperationException("비활성 대화에 입력 반영");
+        void RenderReply(string name, int height, double scale = 1)
+        {
+            var path=Path.Combine(output,name);
+            Render((FrameworkElement)pane.Content,path,360,height,scale);
+            ((ScrollViewer)((TabItem)tabs.SelectedItem).Content).ScrollToEnd();
+            Render((FrameworkElement)pane.Content,path,360,height,scale);
+        }
         pane.Dispose(); if(store.GetDraft($"chat:{session:N}") != pane.Draft) throw new InvalidOperationException("대화 초안 복구 자료 누락");
+        using var copyOnly = new ChatPane(store, analyzer, writer, Guid.NewGuid(), snapshot, () => {});
+        copyOnly.SetActive(true);
+        ((TextBox)Get(copyOnly,"_editor")).Text="확인 후 알려드리겠습니다.";
+        var copyTabs=(TabControl)((DockPanel)copyOnly.Content).Children[1]; copyTabs.SelectedIndex=2;
+        var copyScroll=(ScrollViewer)((TabItem)copyTabs.SelectedItem).Content;
+        var copyButtons=((StackPanel)copyScroll.Content).Children.OfType<Button>().Select(b=>b.Content?.ToString()).ToList();
+        if (!copyButtons.Contains("초안 복사") || copyButtons.Any(b=>b?.Contains("온톡 입력") == true)) throw new InvalidOperationException("제품의 복사 경로에 미검증 입력 기능이 노출됐습니다.");
+        foreach (var height in new[]{800,480})
+        {
+            var copyPath=Path.Combine(output,$"chat-reply-copy-{height}.png");
+            Render((FrameworkElement)copyOnly.Content,copyPath,360,height); copyScroll.ScrollToEnd();
+            Render((FrameworkElement)copyOnly.Content,copyPath,360,height);
+        }
         using var isolated = new ChatPane(store, analyzer, writer, Guid.NewGuid(), snapshot with { RoomHint="같은 제목의 다른 대화" }, () => {});
         if(isolated.Draft.Length != 0 || isolated.Chosen.Count != 0) throw new InvalidOperationException("다른 대화에 이전 초안/선택이 남았습니다.");
         var emptyList = new ConversationsPane(); emptyList.Refresh([]);
@@ -228,6 +286,19 @@ internal static class Program
         results.SelectedItem=taskResult;
         if(!((TextBlock)search.FindName("DetailNotice")).Text.Contains("대화에서 직접 선택") || !((TextBox)search.FindName("DetailBody")).Text.Contains(snapshot.Messages[0].Body)) throw new InvalidOperationException("검색 창의 대화 업무 출처 누락");
         search.Close(); store.DeleteTask(sourceTask.Id);
+    }
+
+    private sealed class PreviewChatInput(ChatSnapshot chat) : IChatInput
+    {
+        public ChatInputState Current = new(1,new IntPtr(2),"synthetic-chat","synthetic-field",chat,"온톡에서 작성 중인 합성 글");
+        public int Writes, Reads;
+        public TaskCompletionSource<ChatInputState?>? Gate;
+        public ChatInputState? Read() { Interlocked.Increment(ref Reads); return Gate is { } gate ? gate.Task.GetAwaiter().GetResult() : Current; }
+        public ChatInputResult Apply(ChatInputState expected,string body)
+        {
+            if(Current.Body != expected.Body) return new(ChatInputStatus.Conflict,Current);
+            Writes++; Current=Current with { Body=body }; return new(ChatInputStatus.Applied,Current);
+        }
     }
 
     private static object Call(object target, string method) => target.GetType().GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(target, [])!;
@@ -251,13 +322,14 @@ internal static class Program
 
     private static void Set(object target, string field, object value) => target.GetType().GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(target, value);
     private static object Get(object target, string field) => target.GetType().GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(target)!;
+    private static object? GetNullable(object target, string field) => target.GetType().GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(target);
     private static void Invoke(object target, string method, params object[] values) => target.GetType().GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(target, values);
-    private static void Render(FrameworkElement root, string path, int width, int height)
+    private static void Render(FrameworkElement root, string path, int width, int height, double scale = 1)
     {
         root.Measure(new Size(width, height)); root.Arrange(new Rect(0, 0, width, height)); root.UpdateLayout();
         root.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
         root.UpdateLayout();
-        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        var bitmap = new RenderTargetBitmap((int)(width*scale), (int)(height*scale), 96*scale, 96*scale, PixelFormats.Pbgra32);
         bitmap.Render(root);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path); encoder.Save(stream);

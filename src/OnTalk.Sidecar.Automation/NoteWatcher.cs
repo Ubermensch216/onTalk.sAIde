@@ -129,7 +129,7 @@ public sealed class NoteWatcher : IDisposable
                 if (hwnd == target)
                 {
                     // 위치 감시(100ms)와 분리한다. 메인 트리는 활성 대상에서만 읽는다.
-                    var tree = readContent ? MsaaReader.ReadTree(render, readEditableValues: false) : null;
+                    var tree = readContent ? MsaaReader.ReadTree(render, readEditableValues: false, readContentText: true) : null;
                     var context = WindowContextParser.Parse(tree ?? root);
                     var chat = tree is not null ? ChatWindowParser.Parse(tree, now) : null;
                     var session = _sessions.Observe(hwnd, render, pid, context, chat: chat);

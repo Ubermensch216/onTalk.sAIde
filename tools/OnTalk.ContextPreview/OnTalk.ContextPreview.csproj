@@ -3,6 +3,7 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <ApplicationManifest>../../src/OnTalk.Sidecar.App/app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/OnTalk.Sidecar.App/OnTalk.Sidecar.App.csproj" />

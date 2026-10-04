@@ -99,6 +99,7 @@ public partial class PanelWindow
             if (_chatPane is null || _chatPaneKey != key)
             {
                 _chatPane?.Dispose();
+                // 제품 입력 요소를 실제 확인할 때까지 입력 비교/반영은 노출하지 않는다. 답변 초안 복사를 제공한다.
                 _chatPane = new ChatPane(_store, _analyzer, _writer, current.SessionId, chat, () => { UpdateFooter(); _tasksWindow?.Reload(); });
                 _chatPaneKey = key;
             }

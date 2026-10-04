@@ -14,6 +14,7 @@ public sealed record AccNode(string Role, string Name, string Value, int State, 
     public const string Whitespace = "whitespace";
     public const string Document = "document";
     public const string EditableText = "text";
+    public const string ContentText = "contenttext";
     public const string CheckBox = "checkbox";
     public const string ComboBox = "combobox";
     public const string ListItem = "listitem";

@@ -3,9 +3,13 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <!-- Accessibility(IAccessible) 참조용 -->
     <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
   <ItemGroup>
+    <Using Include="System.IO" />
     <InternalsVisibleTo Include="OnTalk.Probe" />
+    <InternalsVisibleTo Include="OnTalk.Sidecar.Tests" />
+    <InternalsVisibleTo Include="OnTalk.ContextPreview" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\OnTalk.Sidecar.Core\OnTalk.Sidecar.Core.csproj" />

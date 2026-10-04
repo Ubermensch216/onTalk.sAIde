@@ -13,7 +13,7 @@ internal static class MsaaReader
 
     private static readonly Dictionary<int, string> RoleNames = new()
     {
-        [0x0F] = AccNode.Document, [0x1E] = "link", [0x21] = "list", [0x22] = AccNode.ListItem, [0x18] = "table",
+        [0x0F] = AccNode.Document, [0x12] = "dialog", [0x1E] = "link", [0x21] = "list", [0x22] = AccNode.ListItem, [0x18] = "table",
         [0x28] = "graphic", [0x29] = AccNode.StaticText, [0x2A] = AccNode.EditableText, [0x2B] = "pushbutton",
         [0x2C] = AccNode.CheckBox, [0x2E] = AccNode.ComboBox, [0x3B] = AccNode.Whitespace, [0x1D] = AccNode.Cell,
         [0x25] = "pagetab",
@@ -24,14 +24,19 @@ internal static class MsaaReader
     public static AccNode? ReadRoot(IntPtr renderHwnd) =>
         Root(renderHwnd) is { } acc ? Read(acc, [], "") : null;
 
-    public static AccNode? ReadTree(IntPtr renderHwnd, bool readEditableValues = true)
+    public static AccNode? ReadTree(IntPtr renderHwnd, bool readEditableValues = true, bool readContentText = false)
     {
         if (Root(renderHwnd) is not { } root)
         {
             return null;
         }
+        // 검증한 대화 화면의 표시 글은 포커스 불가능한 text 컨테이너 안에 있다.
+        // 하위 statictext만 해석할 수 있게 구분한다. text의 값은 계속 제외한다.
+        var context = readContentText ? WindowContextParser.Parse(Read(root, [], "", false)) : null;
+        readContentText = context?.Surface == OnTalk.Sidecar.Core.OnTalkSurface.Chat ||
+            context is { Surface: OnTalk.Sidecar.Core.OnTalkSurface.Main, Menu: OnTalk.Sidecar.Core.MainMenu.Conversations };
         var budget = MaxNodes;
-        var tree = ReadSubtree(root, "", ref budget, readEditableValues);
+        var tree = ReadSubtree(root, "", ref budget, readEditableValues, readContentText);
         return tree with { IsTruncated = budget <= 0 };
     }
 
@@ -51,39 +56,38 @@ internal static class MsaaReader
 
     private static bool Act(IntPtr renderHwnd, AccNode expected, Action<IAccessible> action)
     {
+        if (Resolve(renderHwnd, expected) is not { } acc) return false;
+        try { action(acc); return true; }
+        catch { return false; }
+    }
+
+    private static IAccessible? Resolve(IntPtr renderHwnd, AccNode expected)
+    {
         if (Root(renderHwnd) is not { } acc)
         {
-            return false;
+            return null;
         }
         foreach (var index in expected.Path.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse))
         {
             var count = Safe(() => acc.accChildCount);
             if (index >= count)
             {
-                return false;
+                return null;
             }
             var raw = new object[count];
             if (Win32.AccessibleChildren(acc, 0, count, raw, out var got) != 0 || index >= got ||
                 raw[index] is not IAccessible child)
             {
-                return false;
+                return null;
             }
             acc = child;
         }
-        var now = Read(acc, [], expected.Path);
+        var now = Read(acc, [], expected.Path, readEditableValues: false);
         if (now.Role != expected.Role || now.Name != expected.Name)
         {
-            return false;
+            return null;
         }
-        try
-        {
-            action(acc);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        return acc;
     }
 
     private static IAccessible? Root(IntPtr renderHwnd)
@@ -94,7 +98,7 @@ internal static class MsaaReader
             : null;
     }
 
-    private static AccNode ReadSubtree(IAccessible acc, string path, ref int budget, bool readEditableValues)
+    private static AccNode ReadSubtree(IAccessible acc, string path, ref int budget, bool readEditableValues, bool readContentText)
     {
         budget--;
         var children = new List<AccNode>();
@@ -109,19 +113,20 @@ internal static class MsaaReader
                     // 정수 자식 ID(단순 요소)는 Chromium 웹 콘텐츠에서 쓰이지 않는다.
                     if (raw[i] is IAccessible child)
                     {
-                        children.Add(ReadSubtree(child, path.Length == 0 ? $"{i}" : $"{path}/{i}", ref budget, readEditableValues));
+                        children.Add(ReadSubtree(child, path.Length == 0 ? $"{i}" : $"{path}/{i}", ref budget, readEditableValues, readContentText));
                     }
                 }
             }
         }
-        return Read(acc, children, path, readEditableValues);
+        return Read(acc, children, path, readEditableValues, readContentText);
     }
 
-    private static AccNode Read(IAccessible acc, IReadOnlyList<AccNode> children, string path, bool readEditableValues = true)
+    private static AccNode Read(IAccessible acc, IReadOnlyList<AccNode> children, string path, bool readEditableValues = true, bool readContentText = false)
     {
-        var role = Safe(() => acc.get_accRole(Self)) switch
+        var rawRole = Safe(() => acc.get_accRole(Self));
+        var role = rawRole switch
         {
-            int id => RoleNames.TryGetValue(id, out var name) ? name : $"role{id:X}",
+            int id => RoleNames.TryGetValue(id, out var roleName) ? roleName : $"role{id:X}",
             string tag => tag,
             _ => "?",
         };
@@ -135,13 +140,20 @@ internal static class MsaaReader
         {
             // 화면에 없는 요소는 위치를 주지 않는다.
         }
+        var state = Safe(() => acc.get_accState(Self)) is int nativeState ? nativeState : 0;
+        var contentText = readContentText && IsDisplayText(role, state);
+        var name = Safe(() => acc.get_accName(Self)) ?? "";
+        var value = !readEditableValues && role == AccNode.EditableText ? "" : Safe(() => acc.get_accValue(Self)) ?? "";
         return new AccNode(
-            role,
-            Safe(() => acc.get_accName(Self)) ?? "",
-            !readEditableValues && role == AccNode.EditableText ? "" : Safe(() => acc.get_accValue(Self)) ?? "",
-            Safe(() => acc.get_accState(Self)) is int state ? state : 0,
+            contentText ? AccNode.ContentText : role,
+            name,
+            value,
+            state,
             children) { Bounds = bounds, Path = path, HasAction = (Safe(() => acc.get_accDefaultAction(Self)) ?? "").Length > 0 };
     }
+
+    internal static bool IsDisplayText(string role, int state) =>
+        role == AccNode.EditableText && (state & (0x100000 | 0x8000 | 0x1 | 0x200000)) == 0;
 
     private static T? Safe<T>(Func<T> f)
     {

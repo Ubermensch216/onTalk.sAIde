@@ -23,7 +23,7 @@ public sealed record ChatSnapshot(string RoomHint, IReadOnlyList<ChatMessage> Me
 
 public sealed record ConversationItem(string Key, string Name, string Detail, string Preview)
 {
-    public string Label => $"{Name} · {Detail}\n목록 미리보기: {Preview}";
+    public string Label => $"{Name} · {Detail}\n목록 미리보기: {(Preview.Length == 0 ? "표시 글 없음" : Preview)}";
 }
 
 public sealed record RawChatPoint(

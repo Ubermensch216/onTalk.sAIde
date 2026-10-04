@@ -49,7 +49,9 @@ public static partial class ChatWindowParser
         foreach (var list in Visible(root).Where(n => n.Role == "list"))
         {
             var rows = list.Children.Where(n => n.Role == AccNode.ListItem && (n.State & 0x8000) == 0).ToList();
-            var preview = list.Children.Where(n => n.Role == AccNode.StaticText).Select(n => n.Name.Trim()).Where(t => t.Length > 0).ToList();
+            var preview = list.Children.Where(n => n.Role is AccNode.StaticText or AccNode.ContentText)
+                .Select(n => string.Join("\n", Visible(n).Where(c => c.Role == AccNode.StaticText).Select(c => c.Name.Trim()).Where(t => t.Length > 0)))
+                .Where(t => t.Length > 0).ToList();
             if (rows.Count != 1 || preview.Count != 1) continue;
             var labels = Visible(rows[0]).Where(n => n.Role == AccNode.StaticText).Select(n => n.Name.Trim()).Where(t => t.Length > 0).ToList();
             if (labels.Count != 2) continue;
@@ -65,5 +67,5 @@ public static partial class ChatWindowParser
         foreach (var child in node.Children) foreach (var next in Visible(child)) yield return next;
     }
     [GeneratedRegex(@"^(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일(?:\s.*)?$")] private static partial Regex DatePattern();
-    [GeneratedRegex(@"^(오전|오후)\s*\d{1,2}:\d{2}$")] private static partial Regex TimePattern();
+    [GeneratedRegex(@"^(오전|오후)\s*(?:0?[1-9]|1[0-2]):[0-5]\d$")] private static partial Regex TimePattern();
 }
