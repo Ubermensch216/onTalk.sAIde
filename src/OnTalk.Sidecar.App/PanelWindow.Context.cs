@@ -9,6 +9,9 @@ public partial class PanelWindow
 {
     private PeoplePane? _peoplePane;
     private string? _peoplePaneKey;
+    private ChatPane? _chatPane;
+    private string? _chatPaneKey;
+    private ConversationsPane? _conversationsPane;
     private void ApplyCurrentContext(WatchSnapshot snapshot)
     {
         if (_store is null || snapshot.AccountCandidate != _store.LoginId) return;
@@ -90,21 +93,47 @@ public partial class PanelWindow
         }
 
         _activePane?.SetActive(false);
+        if (context.Surface == OnTalkSurface.Chat)
+        {
+            if (current.Chat is not { } chat) { ShowEmpty("현재 대화 텍스트를 읽지 못했습니다."); return; }
+            if (_chatPane is null || _chatPaneKey != key)
+            {
+                _chatPane?.Dispose();
+                _chatPane = new ChatPane(_store, _analyzer, _writer, current.SessionId, chat, () => { UpdateFooter(); _tasksWindow?.Reload(); });
+                _chatPaneKey = key;
+            }
+            _chatPane.Refresh(chat); _chatPane.SetActive(true);
+            ChatHost.Content = _chatPane; ChatHost.Visibility = Visibility.Visible;
+            EmptyState.Visibility = NoteView.Visibility = ComposeHost.Visibility = PeopleHost.Visibility = ContextView.Visibility = Visibility.Collapsed;
+            return;
+        }
+        _chatPane?.SetActive(false);
+        if (context.Surface == OnTalkSurface.Main && context.Menu == MainMenu.Conversations)
+        {
+            _conversationsPane ??= new ConversationsPane();
+            _conversationsPane.Refresh(current.Conversations);
+            ChatHost.Content = _conversationsPane; ChatHost.Visibility = Visibility.Visible;
+            EmptyState.Visibility = NoteView.Visibility = ComposeHost.Visibility = PeopleHost.Visibility = ContextView.Visibility = Visibility.Collapsed;
+            return;
+        }
         if (context.Surface == OnTalkSurface.Main && context.Menu is MainMenu.Friends or MainMenu.Organization)
         {
             if (_peoplePane is null || _peoplePaneKey != key)
             {
+                _peoplePane?.Dispose();
                 _peoplePane = new PeoplePane(_store, context.Menu,
-                    preparation => OpenCompose(null, preparation: preparation), OpenContactCandidate);
+                    preparation => OpenCompose(null, preparation: preparation), OpenContactCandidate, _writer);
                 _peoplePaneKey = key;
             }
             _peoplePane.Refresh(current.People ?? new PeopleSnapshot(context.Menu, [], [], [], DateTimeOffset.Now));
+            _peoplePane.SetActive(true);
             PeopleHost.Content = _peoplePane;
             EmptyState.Visibility = NoteView.Visibility = ComposeHost.Visibility = ContextView.Visibility = Visibility.Collapsed;
             PeopleHost.Visibility = Visibility.Visible;
             return;
         }
         PeopleHost.Visibility = Visibility.Collapsed;
+        ChatHost.Visibility = Visibility.Collapsed;
         EmptyState.Visibility = NoteView.Visibility = ComposeHost.Visibility = Visibility.Collapsed;
         ContextView.Visibility = Visibility.Visible;
         ContextPurpose.Text = guide.Purpose;

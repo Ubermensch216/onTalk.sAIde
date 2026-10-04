@@ -21,6 +21,10 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args is ["--inspect", var target] && long.TryParse(target, out var handle))
+        {
+            var inspector = new Application(); inspector.Run(new LiveContextWindow(new IntPtr(handle))); return 0;
+        }
         var output = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/context-preview");
         Directory.CreateDirectory(output);
         RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
@@ -60,7 +64,11 @@ internal static class Program
                 context.Title, context.Surface == OnTalkSurface.NoteRead ? note : null, context.Surface == OnTalkSurface.NoteCompose ? compose : null)
                 { ComposeKind = context.ComposeKind };
             var snapshot = new WatchSnapshot(true, [new NoteWindow(hwnd, content) { SessionId = session }])
-                { AccountCandidate = "preview", Contexts = [new WindowContext(hwnd, session, context)] };
+                { AccountCandidate = "preview", Contexts = [new WindowContext(hwnd, session, context)
+                {
+                    Chat = context.Surface == OnTalkSurface.Chat ? new ChatSnapshot("예시 대화", [new("example:1", "발신자 미확인", "오전 10:00", new DateOnly(2026,10,4), "점검 결과를 확인해 주세요.")], DateTimeOffset.Now) : null,
+                    Conversations = context.Menu == MainMenu.Conversations ? [new("room:1", "점검 협의", "표시 참여자 3명", "결과 공유 안내")] : []
+                }] };
             Set(panel, "_latestSnapshot", snapshot);
             Invoke(panel, "ApplyCurrentContext", snapshot);
             var root = (FrameworkElement)panel.Content;
@@ -151,9 +159,94 @@ internal static class Program
         Render((FrameworkElement)helper.Content, Path.Combine(output, "expanded-compose.png"), 680, 780);
         Render((FrameworkElement)helper.Content, Path.Combine(output, "expanded-compose-short.png"), 640, 520);
         helper.Close();
+        VerifyChat(store, output);
         panel.Close();
-        Console.WriteLine($"PASS: 기본 {cases.Length}개 문맥, 사람 선택 {peopleCases.Length}종, 작성 도우미 2종 · 44개 이미지 · 선택 변경/수동 선택/상세 보존/연락 준비/제안 수락·만료 검사. {output}");
+        Console.WriteLine($"PASS: 기본 {cases.Length}개 문맥, 사람 선택 {peopleCases.Length}종, 작성 도우미 2종, 대화 4개 탭 · 52개 이미지 · 선택/원문 고정/업무 근거/제안 수락·만료 검사. {output}");
         return 0;
+    }
+
+    private static void VerifyChat(ProfileStore store, string output)
+    {
+        using var handler = new PreviewAiHandler(); using var writer = new OllamaWriter(handler: handler);
+        using var analyzer = new OllamaAnalyzer(handler: new PreviewAiHandler());
+        var session = Guid.NewGuid();
+        var snapshot = new ChatSnapshot("예시 점검 대화 · 방 ID 미확인", [
+            new("preview-chat:1", "발신자 미확인", "오전 10:00", new DateOnly(2026,10,4), "점검 결과표를 확인해 주세요."),
+            new("preview-chat:2", "예시 상대", "오전 10:01", new DateOnly(2026,10,4), "제출 날짜는 아직 협의 중입니다."),
+            new("preview-chat:3", "발신자 미확인", "오전 10:02", new DateOnly(2026,10,4), "자료 양식은 어디에 있나요?")], DateTimeOffset.Now);
+        var changed = 0;
+        using var pane = new ChatPane(store, analyzer, writer, session, snapshot, () => changed++);
+        pane.SetActive(true); Invoke(pane, "SelectRecent");
+        var editor = (TextBox)Get(pane, "_editor"); editor.Text = "제출 날짜를 확인한 뒤 답변드릴게요.";
+        pane.Refresh(snapshot with { Messages = [.. snapshot.Messages, new("preview-chat:4", "예시 상대", "오전 10:03", snapshot.Messages[0].Date, "추가로 확인할 내용이 있습니다.")] });
+        if (pane.Source.Messages.Count != 3 || pane.Chosen.Count != 3 || pane.Draft != editor.Text) throw new InvalidOperationException("새 메시지가 선택 원문/초안을 바꿨습니다.");
+        var tabs = ((DockPanel)pane.Content).Children.OfType<TabControl>().Single();
+        for (var i = 0; i < tabs.Items.Count; i++)
+        {
+            tabs.SelectedIndex = i;
+            if (i == 1) Finish((Task)Call(pane, "AnalyzeAsync"));
+            if (i == 2)
+            {
+                handler.Reply = "확인 후 알려드릴게요.";
+                Finish((Task)Call(pane, "SuggestAsync"));
+                Invoke(pane, "AcceptProposal"); if (pane.Draft != handler.Reply) throw new InvalidOperationException("대화 제안 수락 실패");
+                ((Button)Get(pane,"_undo")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                if (pane.Draft != "제출 날짜를 확인한 뒤 답변드릴게요.") throw new InvalidOperationException("대화 초안 되돌리기 실패");
+                handler.Delay = new TaskCompletionSource<string>();
+                var late = (Task)Call(pane,"SuggestAsync"); editor.Text = "직접 고친 최신 글"; handler.Delay.SetResult("오래된 제안"); Finish(late);
+                Invoke(pane,"AcceptProposal"); if (pane.Draft != "직접 고친 최신 글") throw new InvalidOperationException("대화의 늦은 제안이 덮어썼습니다.");
+                handler.Delay = null;
+                Finish((Task)Call(pane,"SuggestAsync"));
+            }
+            if (i == 3)
+            {
+                ((ComboBox)Get(pane,"_taskMessage")).SelectedIndex = 0;
+                ((TextBox)Get(pane,"_taskTitle")).Text = "합성 대화 점검 업무";
+                Invoke(pane,"Register");
+                if (changed != 1) throw new InvalidOperationException("대화 업무 등록 실패");
+                var task = store.GetTasks().Single(t=>t.Title == "합성 대화 점검 업무");
+                if (store.GetChatTaskSource(task.Id)?.Body != snapshot.Messages[0].Body || task.NoteId is not null) throw new InvalidOperationException("대화 업무 출처가 왜곡됐습니다.");
+                Invoke(pane,"Register"); if(changed != 1) throw new InvalidOperationException("대화 업무가 중복 등록됐습니다.");
+                store.DeleteTask(task.Id);
+            }
+            Render((FrameworkElement)pane.Content,Path.Combine(output,$"chat-tab-{i}.png"),360,800);
+            Render((FrameworkElement)pane.Content,Path.Combine(output,$"chat-tab-{i}-short.png"),360,480);
+        }
+        pane.SetActive(false); Invoke(pane,"AcceptProposal"); if(pane.Draft != "직접 고친 최신 글") throw new InvalidOperationException("비활성 대화 초안 변경");
+        pane.Dispose(); if(store.GetDraft($"chat:{session:N}") != pane.Draft) throw new InvalidOperationException("대화 초안 복구 자료 누락");
+        using var isolated = new ChatPane(store, analyzer, writer, Guid.NewGuid(), snapshot with { RoomHint="같은 제목의 다른 대화" }, () => {});
+        if(isolated.Draft.Length != 0 || isolated.Chosen.Count != 0) throw new InvalidOperationException("다른 대화에 이전 초안/선택이 남았습니다.");
+        var emptyList = new ConversationsPane(); emptyList.Refresh([]);
+        if (((StackPanel)Get(emptyList,"_rows")).Children.Count == 0) throw new InvalidOperationException("빈 대화 목록 안내 누락");
+        var sourceTask = store.AddChatTask("합성 출처 검색 업무",null,new ChatTaskSource(snapshot.RoomHint,snapshot.Messages[0].Sender,snapshot.Messages[0].Time,snapshot.Messages[0].Date,snapshot.Messages[0].Key,snapshot.Messages[0].Body,snapshot.Messages[0].Body,snapshot.ObservedAt),DateTimeOffset.Now);
+        using var embedder = new OllamaEmbedder(); var search = new SearchWindow(store,embedder);
+        ((TextBox)search.FindName("QueryBox")).Text="합성 출처 검색 업무";
+        Invoke(search,"Search");
+        var results=(ListBox)search.FindName("Results");
+        var taskResult=results.Items.OfType<SearchRow>().FirstOrDefault(r=>r.Task?.Id==sourceTask.Id);
+        if(taskResult is null) throw new InvalidOperationException("대화 업무 검색 결과 누락");
+        results.SelectedItem=taskResult;
+        if(!((TextBlock)search.FindName("DetailNotice")).Text.Contains("대화에서 직접 선택") || !((TextBox)search.FindName("DetailBody")).Text.Contains(snapshot.Messages[0].Body)) throw new InvalidOperationException("검색 창의 대화 업무 출처 누락");
+        search.Close(); store.DeleteTask(sourceTask.Id);
+    }
+
+    private static object Call(object target, string method) => target.GetType().GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(target, [])!;
+    private static void Finish(Task task)
+    {
+        var until = DateTime.UtcNow.AddSeconds(5);
+        while (!task.IsCompleted && DateTime.UtcNow < until) Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        if (!task.IsCompleted) throw new TimeoutException("합성 AI 검사가 완료되지 않았습니다.");
+        task.GetAwaiter().GetResult();
+    }
+    private sealed class PreviewAiHandler : System.Net.Http.HttpMessageHandler
+    {
+        public string Reply { get; set; } = "{\"summary\":\"제출 날짜는 협의 중이며 양식 위치를 확인하는 흐름입니다.\",\"points\":[{\"kind\":\"question\",\"title\":\"자료 양식 위치 확인\",\"message\":3,\"evidence\":\"자료 양식은 어디에 있나요?\"}]}";
+        public TaskCompletionSource<string>? Delay { get; set; }
+        protected override async Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, CancellationToken cancel)
+        {
+            var reply = Delay is { } delay ? await delay.Task : Reply;
+            return new(System.Net.HttpStatusCode.OK) { Content = new System.Net.Http.StringContent(System.Text.Json.JsonSerializer.Serialize(new { message = new { content = reply } }), System.Text.Encoding.UTF8,"application/json") };
+        }
     }
 
     private static void Set(object target, string field, object value) => target.GetType().GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(target, value);

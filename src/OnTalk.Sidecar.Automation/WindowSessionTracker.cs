@@ -9,8 +9,9 @@ public sealed class WindowSessionTracker
 {
     private sealed record Entry(IntPtr Render, uint Pid, string Stamp, Guid Session);
     private readonly Dictionary<IntPtr, Entry> _windows = [];
+    private readonly Dictionary<IntPtr, ChatSnapshot> _chats = [];
 
-    public Guid Observe(IntPtr hwnd, IntPtr render, uint pid, SidecarContext context, NoteWindowContent? content = null)
+    public Guid Observe(IntPtr hwnd, IntPtr render, uint pid, SidecarContext context, NoteWindowContent? content = null, ChatSnapshot? chat = null)
     {
         var source = content?.Note?.Key ?? "";
         if (content?.Compose is { } compose)
@@ -20,8 +21,11 @@ public sealed class WindowSessionTracker
             source = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(quote)));
         }
         var stamp = $"{context.Surface}:{context.ComposeKind}:{source}";
+        var roomChanged = chat is not null && _chats.TryGetValue(hwnd, out var previousChat) && !chat.Continues(previousChat);
+        if (chat is not null) { _chats[hwnd] = chat; stamp += ":" + chat.RoomHint; }
+        else if (context.Surface != OnTalkSurface.Unknown) _chats.Remove(hwnd);
         if (!_windows.TryGetValue(hwnd, out var previous) || previous.Render != render || previous.Pid != pid ||
-            (context.Surface != OnTalkSurface.Unknown && previous.Stamp != stamp))
+            roomChanged || (context.Surface != OnTalkSurface.Unknown && previous.Stamp != stamp))
         {
             _windows[hwnd] = previous = new Entry(render, pid, stamp, Guid.NewGuid());
         }
@@ -30,8 +34,8 @@ public sealed class WindowSessionTracker
 
     public void RemoveMissing(Func<IntPtr, bool> exists)
     {
-        foreach (var hwnd in _windows.Keys.Where(h => !exists(h)).ToList()) _windows.Remove(hwnd);
+        foreach (var hwnd in _windows.Keys.Where(h => !exists(h)).ToList()) { _windows.Remove(hwnd); _chats.Remove(hwnd); }
     }
 
-    public void Clear() => _windows.Clear();
+    public void Clear() { _windows.Clear(); _chats.Clear(); }
 }

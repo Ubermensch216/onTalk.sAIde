@@ -46,7 +46,7 @@
                                         </CheckBox>
                                         <TextBlock Text="{Binding DueLine}" Style="{StaticResource Small}" Margin="27,3,0,0" />
                                         <TextBlock Text="{Binding Origin}" Style="{StaticResource Caption}" Margin="27,2,0,0"
-                                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                                   TextWrapping="Wrap" />
                                     </StackPanel>
                                 </DockPanel>
                             </Border>

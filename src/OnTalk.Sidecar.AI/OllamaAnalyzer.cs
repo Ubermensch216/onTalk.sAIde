@@ -11,7 +11,7 @@ public sealed class AnalysisUnavailableException(string message, Exception? inne
 /// 이 PC의 Ollama에 쪽지 분석을 맡긴다. 주소는 루프백으로 고정이라 쪽지가 PC 밖으로 나가지 않는다.
 /// 모델 결과는 그대로 쓰지 않고 <see cref="AnalysisValidator"/>로 원문과 대조한다.
 /// </summary>
-public sealed class OllamaAnalyzer : IDisposable
+public sealed partial class OllamaAnalyzer : IDisposable
 {
     /// <summary>프롬프트나 검증 규칙을 바꾸면 올린다. 저장된 분석을 다시 만들게 된다.</summary>
     public const string PromptVersion = "1";

@@ -2,11 +2,12 @@ using System.Windows;
 using System.Windows.Controls;
 using OnTalk.Sidecar.Core;
 using OnTalk.Sidecar.Storage;
+using OnTalk.Sidecar.AI;
 
 namespace OnTalk.Sidecar.App;
 
 /// <summary>확인된 목록과 명시적 대상 선택을 사용한다. 자동으로 수신자를 추가하지 않는다.</summary>
-public sealed class PeoplePane : UserControl
+public sealed class PeoplePane : UserControl, IDisposable
 {
     private readonly ProfileStore _store;
     private readonly Action<ContactPreparation> _prepare;
@@ -38,10 +39,19 @@ public sealed class PeoplePane : UserControl
     private string _renderSignature = "\0";
     private bool _refreshing;
     private bool _native;
+    private readonly OllamaWriter? _writer;
+    private CancellationTokenSource? _queryCancel;
+    private long _queryVersion;
+    private IReadOnlyList<string>? _terms;
+    private string? _termQuery;
+    private bool _disposed, _active = true;
+    private readonly TextBlock _termNotice = new() { TextWrapping = TextWrapping.Wrap };
+    private readonly Button _acceptTerms = new() { Content = "제안 검색어로 후보 찾기", IsEnabled = false };
 
-    public PeoplePane(ProfileStore store, MainMenu menu, Action<ContactPreparation> prepare, Action<StoredNote> openNote)
+    public PeoplePane(ProfileStore store, MainMenu menu, Action<ContactPreparation> prepare, Action<StoredNote> openNote, OllamaWriter? writer = null)
     {
         (_store, _prepare, _openNote) = (store, prepare, openNote);
+        _writer = writer;
         _snapshot = new(menu, [], [], [], DateTimeOffset.Now);
         _purpose.ItemsSource = new[] { "문의", "진행 확인", "자료 요청", "감사" }; _purpose.SelectedIndex = 0;
         var body = new StackPanel { Margin = new Thickness(12) };
@@ -53,7 +63,13 @@ public sealed class PeoplePane : UserControl
         _query.ToolTip = "이름·소속·직급·확인한 담당업무의 글자 일치 검색. 예: 여비 / 건설과 보상";
         body.Children.Add(Label(menu == MainMenu.Organization ? "담당업무·소속에서 후보 찾기" : "확인한 사람 찾기", "SectionTitle"));
         body.Children.Add(_query);
-        _query.TextChanged += (_, _) => RenderRows();
+        _query.TextChanged += (_, _) => { _queryVersion++; _queryCancel?.Cancel(); _terms = null; _termQuery = null; _acceptTerms.IsEnabled = false; _termNotice.Text = ""; RenderRows(); };
+        if (writer is not null)
+        {
+            var suggest = new Button { Content = "질문에서 검색어 제안" }; suggest.Click += async (_, _) => await SuggestTermsAsync(); body.Children.Add(suggest);
+            body.Children.Add(_termNotice); body.Children.Add(_acceptTerms);
+            _acceptTerms.Click += (_, _) => { if (_terms is null || _disposed || !_active) return; _termQuery = string.Join(" ", _terms); _acceptTerms.IsEnabled = false; _termNotice.Text = "사용한 AI 제안 검색어: " + _termQuery + " · 아래 실제 글자 일치 근거를 확인하세요."; RenderRows(); };
+        }
         body.Children.Add(new ScrollViewer { Content = _rows, MaxHeight = 250, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         body.Children.Add(_selection); body.Children.Add(_warning);
         _detailPanel.Content = new ScrollViewer { Content = _details, MaxHeight = 160, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -126,7 +142,8 @@ public sealed class PeoplePane : UserControl
     private void RenderRows()
     {
         _refreshing = true; _rows.Children.Clear();
-        var matches = _query.Text.Trim().Length > 0 ? ContactSupport.Find(Current, _query.Text) : Current.Select(p => new ContactMatch(p, "")).ToList();
+        var query = _termQuery ?? _query.Text;
+        var matches = query.Trim().Length > 0 ? ContactSupport.Find(Current, query) : Current.Select(p => new ContactMatch(p, "")).ToList();
         foreach (var hit in matches)
         {
             var person = hit.Person;
@@ -161,16 +178,54 @@ public sealed class PeoplePane : UserControl
         _start.IsEnabled = _save.IsEnabled = chosen.Count > 0;
         _history.Children.Clear();
         if (chosen.Count != 1) return;
-        var notes = _store.GetContactNoteCandidates(chosen[0].Name);
+        var notes = _store.GetContactLinkedNotes(chosen[0]).Concat(_store.GetContactNoteCandidates(chosen[0].Name)).DistinctBy(n => n.Id).ToList();
         foreach (var note in notes)
         {
+            var person = chosen[0];
+            var linkedAt = _store.ContactNoteLinkedAt(person, note.Id);
             var button = new Button { Content = Label($"{note.Note.SenderName} · {note.Note.SentAtText}\n{note.Note.SenderDetail}\n{Snippet.Make(note.Note.Body, [], 45)}", "Small"), Margin = new Thickness(0, 4, 0, 0) };
             button.Click += (_, _) => _openNote(note); _history.Children.Add(button);
+            if (linkedAt is { } at) _history.Children.Add(Label($"사용자가 연결 · {at.ToLocalTime():yyyy-MM-dd HH:mm}\n화면 표시 정보에 연결했습니다. 고유 ID 확인이나 자동 동일인 인증은 아닙니다.", "Caption"));
+            var link = new Button { Content = linkedAt is null ? "이 사람의 자료로 직접 연결" : "이 자료 연결 해제", Margin = new Thickness(0, 0, 0, 6) };
+            link.Click += (_, _) =>
+            {
+                if (linkedAt is null)
+                {
+                    if (Dialogs.Show(Window.GetWindow(this), $"{person.Label}\n\n쪽지: {note.Note.SenderName} · {note.Note.SenderDetail}\n{note.Note.SentAtText}\n\n원문을 확인하고 이 사람의 자료로 연결할까요? 같은 표시 정보에 대한 사용자 연결이며 고유 ID 인증은 아닙니다.", "자료 연결", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+                    _store.LinkContactNote(person, note.Id, DateTimeOffset.Now);
+                }
+                else _store.UnlinkContactNote(person, note.Id);
+                UpdateSelection();
+            };
+            link.IsEnabled = Current.Count(p => p.DisplayIdentity == person.DisplayIdentity) == 1;
+            _history.Children.Add(link);
             foreach (var task in _store.GetTasks(note.Id).Where(t => !t.Done).Take(3))
                 _history.Children.Add(Label($"이 후보 쪽지의 열린 업무: {task.Title}", "Caption"));
         }
         if (notes.Count == 0) _history.Children.Add(Label("같은 발신자 이름으로 보관한 쪽지가 없습니다.", "Small"));
     }
+
+    private async Task SuggestTermsAsync()
+    {
+        if (_writer is null || _disposed || !_active || _query.Text.Trim().Length == 0) return;
+        _queryCancel?.Cancel(); _queryCancel?.Dispose(); _queryCancel = new CancellationTokenSource();
+        var version = ++_queryVersion; _terms = null; _acceptTerms.IsEnabled = false; _termNotice.Text = "로컬 AI로 검색어 제안 중…";
+        try
+        {
+            var terms = await _writer.SuggestContactTermsAsync(_query.Text, _queryCancel.Token);
+            if (_disposed || !_active || version != _queryVersion) return;
+            _terms = terms; _termNotice.Text = "제안 검색어: " + string.Join(" · ", terms) + "\n검토 후 후보 찾기를 누르면 확인한 화면 정보의 글자 일치만 검색합니다."; _acceptTerms.IsEnabled = true;
+        }
+        catch (OperationCanceledException) { }
+        catch (AnalysisUnavailableException ex) { if (!_disposed && version == _queryVersion) _termNotice.Text = ex.Message; }
+    }
+
+    public void SetActive(bool active)
+    {
+        if (_active != active) { _queryVersion++; _queryCancel?.Cancel(); _acceptTerms.IsEnabled = false; }
+        _active = active; IsEnabled = active && !_disposed;
+    }
+    public void Dispose() { if (_disposed) return; _disposed = true; _queryVersion++; _queryCancel?.Cancel(); IsEnabled = false; }
 
     private static string Detail(ContactPerson person) =>
         (person.DetailsObservedAt is { } observed ? $"상세 확인: {observed.ToLocalTime():HH:mm:ss} 당시 표시\n" : "") +

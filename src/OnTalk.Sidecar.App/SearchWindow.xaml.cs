@@ -179,6 +179,11 @@ public partial class SearchWindow : Window
                 ? $"출처 쪽지: {origin}"
                 : "직접 추가한 업무입니다.";
             DetailBody.Text = task.Evidence is { } evidence ? $"근거 문장\n{evidence}" : "";
+            if (_store.GetChatTaskSource(task.Id) is { } chatSource)
+            {
+                DetailNotice.Text = chatSource.Label;
+                DetailBody.Text = "등록 당시 선택한 메시지 원문\n" + chatSource.Body;
+            }
             DetailAttachments.Text = "";
         }
         DetailBody.ScrollToHome();

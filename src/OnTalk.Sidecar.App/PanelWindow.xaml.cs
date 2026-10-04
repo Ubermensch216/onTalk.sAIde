@@ -127,6 +127,8 @@ public partial class PanelWindow : Window
             _tray?.Dispose();
             _analysisCancel?.Cancel();
             foreach (var pane in _composePanes.Values) pane.Dispose();
+            _chatPane?.Dispose();
+            _peoplePane?.Dispose();
             _closing.Cancel();
             _watcher.Dispose();
             _analyzer.Dispose();
@@ -269,9 +271,11 @@ public partial class PanelWindow : Window
         foreach (var pane in _composePanes.Values) pane.Dispose();
         _composePanes.Clear();
         _activePane = null;
-        _peoplePane = null;
+        _peoplePane?.Dispose(); _peoplePane = null;
         _peoplePaneKey = null;
         PeopleHost.Content = null;
+        _chatPane?.Dispose(); _chatPane = null; _chatPaneKey = null; _conversationsPane = null;
+        ChatHost.Content = null;
         _context = null;
         _contextViewKey = null;
         _manageWindow?.Close();
@@ -420,8 +424,11 @@ public partial class PanelWindow : Window
     private void ShowEmpty(string message)
     {
         _activePane?.SetActive(false);
+        _peoplePane?.SetActive(false);
         ComposeHost.Visibility = Visibility.Collapsed;
         PeopleHost.Visibility = Visibility.Collapsed;
+        _chatPane?.SetActive(false);
+        ChatHost.Visibility = Visibility.Collapsed;
         ContextView.Visibility = Visibility.Collapsed;
         ContextHeader.Visibility = Visibility.Collapsed;
         WindowSubtitle.Text = "온톡 작업 도우미";
@@ -854,6 +861,7 @@ public partial class PanelWindow : Window
         var target = _dock.Poll();
         if (_dock.Target != _dockedTo)
         {
+            _chatPane?.Dispose(); _chatPane = null; _chatPaneKey = null; ChatHost.Content = null;
             _dockedTo = _dock.Target;
             _forceExpanded = false;
             _watcher.FollowTarget(_dockedTo);

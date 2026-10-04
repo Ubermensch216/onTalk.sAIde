@@ -183,6 +183,7 @@
             </ScrollViewer>
             <ContentControl x:Name="ComposeHost" Visibility="Collapsed" />
             <ContentControl x:Name="PeopleHost" Visibility="Collapsed" />
+            <ContentControl x:Name="ChatHost" Visibility="Collapsed" />
 
             <!-- 아직 쪽지가 없을 때 -->
             <StackPanel x:Name="EmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="28,0,28,40">

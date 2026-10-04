@@ -11,6 +11,8 @@ public sealed record NoteWindow(IntPtr Hwnd, NoteWindowContent Content)
 public sealed record WindowContext(IntPtr Hwnd, Guid SessionId, SidecarContext Context)
 {
     public PeopleSnapshot? People { get; init; }
+    public ChatSnapshot? Chat { get; init; }
+    public IReadOnlyList<ConversationItem> Conversations { get; init; } = [];
 }
 
 /// <param name="OnTalkRunning">온톡 프로세스가 있는지.</param>
@@ -63,8 +65,9 @@ public sealed class NoteWatcher : IDisposable
             catch (Exception)
             {
                 // 읽는 도중 창이 닫히는 등의 일시 오류. 다음 주기에 다시 읽는다.
-                snapshot = new WatchSnapshot(true, []) { AccountCandidate = OnTalkAccount.DetectCandidate() };
+                snapshot = new WatchSnapshot(true, []);
             }
+            if (_stop.IsCancellationRequested) break;
             Updated?.Invoke(snapshot);
             _stop.Token.WaitHandle.WaitOne(Interval);
         }
@@ -128,11 +131,14 @@ public sealed class NoteWatcher : IDisposable
                     // 위치 감시(100ms)와 분리한다. 메인 트리는 활성 대상에서만 읽는다.
                     var tree = readContent ? MsaaReader.ReadTree(render, readEditableValues: false) : null;
                     var context = WindowContextParser.Parse(tree ?? root);
-                    var session = _sessions.Observe(hwnd, render, pid, context);
+                    var chat = tree is not null ? ChatWindowParser.Parse(tree, now) : null;
+                    var session = _sessions.Observe(hwnd, render, pid, context, chat: chat);
                     contexts.Add(new WindowContext(hwnd, session, context)
                     {
                         People = tree is not null && context.Surface == OnTalkSurface.Main && context.Menu is Core.MainMenu.Friends or Core.MainMenu.Organization
-                            ? MainPeopleParser.Parse(tree, context.Menu, now) : null
+                            ? MainPeopleParser.Parse(tree, context.Menu, now) : null,
+                        Chat = chat,
+                        Conversations = tree is not null ? ChatWindowParser.ParseList(tree) : []
                     });
                     if (context.Surface == OnTalkSurface.Login) break;
                 }
@@ -161,7 +167,8 @@ public sealed class NoteWatcher : IDisposable
         _stop.Cancel();
         if (_thread.IsAlive)
         {
-            _thread.Join(TimeSpan.FromSeconds(2));
+            // COM 읽기가 늦어지면 아직 토큰을 쓰는 감시 스레드의 CTS를 먼저 폐기하지 않는다.
+            if (!_thread.Join(TimeSpan.FromSeconds(2))) return;
         }
         _stop.Dispose();
     }

@@ -24,7 +24,7 @@ public partial class TasksWindow : Window
         var now = DateTimeOffset.Now;
         var all = _store.GetTasks();
         var shown = all.Where(t => ShowDone.IsChecked == true || !t.Done)
-            .Select(t => new TaskRow(t, now, t.NoteId is { } id ? _store.DescribeNote(id) : null))
+            .Select(t => new TaskRow(t, now, t.NoteId is { } id ? _store.DescribeNote(id) : _store.GetChatTaskSource(t.Id)?.Label))
             .ToList();
         // 목록을 다시 채울 때 날짜 선택기가 내는 변경 이벤트를 저장으로 처리하지 않는다.
         _loading = true;

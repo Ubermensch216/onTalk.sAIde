@@ -34,6 +34,7 @@ public static class WindowContextParser
         var route = hash >= 0 ? url[(hash + 1)..].Split('?')[0].TrimEnd('/') : "";
         if (route == "/main/1") return new(OnTalkSurface.Main, MainMenu.Friends);
         if (route == "/organizations") return new(OnTalkSurface.Main, MainMenu.Organization);
+        if (route == "/chatrooms") return new(OnTalkSurface.Main, MainMenu.Conversations);
 
         var selectedMenus = root.DescendantsAndSelf()
             .Where(n => n.Role is "pagetab" or "listitem" or "link" or "pushbutton" &&
