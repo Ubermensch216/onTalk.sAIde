@@ -44,7 +44,6 @@ public partial class PanelWindow : Window
 
     private ProfileStore? _store;
     private string? _candidateAccount;
-    private IntPtr _attached;
     private IntPtr _self;
     private HwndSource? _source;
     private TrayIcon? _tray;
@@ -66,6 +65,13 @@ public partial class PanelWindow : Window
     private ManageWindow? _manageWindow;
     private string? _onTalkVersion;
     private bool _embedding;
+    private WatchSnapshot? _latestSnapshot;
+    private WindowContext? _context;
+    private MainMenu _manualMenu;
+    private IntPtr _manualMenuWindow;
+    private readonly Dictionary<string, NoteComposePane> _composePanes = [];
+    private NoteComposePane? _activePane;
+    private string? _contextViewKey;
 
     public PanelWindow()
     {
@@ -120,6 +126,7 @@ public partial class PanelWindow : Window
             _source?.RemoveHook(OnWindowMessage);
             _tray?.Dispose();
             _analysisCancel?.Cancel();
+            foreach (var pane in _composePanes.Values) pane.Dispose();
             _closing.Cancel();
             _watcher.Dispose();
             _analyzer.Dispose();
@@ -132,7 +139,7 @@ public partial class PanelWindow : Window
     // 감시 스레드에서 호출된다.
     private void OnWatcherUpdated(WatchSnapshot snapshot)
     {
-        var candidate = snapshot.OnTalkRunning ? OnTalkAccount.DetectCandidate() : null;
+        var candidate = snapshot.AccountCandidate;
         // 온톡이 스스로 업데이트하면 화면 구성이 바뀔 수 있다. 실행 중인 버전을 한 번 읽어 둔다.
         var version = snapshot.OnTalkRunning ? _onTalkVersion ?? OnTalkAccount.RunningVersion() : null;
         Dispatcher.BeginInvoke(() =>
@@ -144,13 +151,13 @@ public partial class PanelWindow : Window
 
     private void Apply(WatchSnapshot snapshot, string? candidate)
     {
+        _latestSnapshot = snapshot;
         UpdateAccount(candidate);
 
         if (!snapshot.OnTalkRunning)
         {
             SetStatus("온톡이 실행되지 않았습니다", "#9CA3AF");
             ShowEmpty("온톡을 실행하면 자동으로 연결합니다.");
-            _attached = IntPtr.Zero;
             return;
         }
         if (_store is null)
@@ -159,7 +166,6 @@ public partial class PanelWindow : Window
             ShowEmpty(candidate is null
                 ? "온톡에 로그인하면 계정을 확인합니다."
                 : "위에서 계정 연결을 확인하면 쪽지 수집을 시작합니다.");
-            _attached = IntPtr.Zero;
             return;
         }
 
@@ -180,8 +186,20 @@ public partial class PanelWindow : Window
 
         _composeWindow?.UpdateTargets(snapshot.Notes
             .Where(n => n.Content.Compose is not null)
-            .Select(n => new ComposeTarget(n.Hwnd, DescribeTarget(n.Content), n.Content.Compose!))
+            .Select(n => new ComposeTarget(n.Hwnd, DescribeTarget(n.Content), n.Content.Compose!)
+            {
+                SessionId = n.SessionId, Kind = n.Content.ComposeKind
+            })
             .ToList());
+
+        var sessions = snapshot.Notes.Select(n => n.SessionId).ToHashSet();
+        foreach (var key in _composePanes.Where(p => !sessions.Contains(p.Value.SessionId)).Select(p => p.Key).ToList())
+        {
+            var pane = _composePanes[key];
+            if (ReferenceEquals(_activePane, pane)) { _activePane = null; ComposeHost.Content = null; }
+            pane.Dispose();
+            _composePanes.Remove(key);
+        }
 
         var received = snapshot.Notes.Where(n => n.Content.Kind == NoteWindowKind.Received).ToList();
         foreach (var window in received)
@@ -189,25 +207,8 @@ public partial class PanelWindow : Window
             Collect(window);
         }
 
-        var foreground = Win32.GetForegroundWindow();
-        var target = received.FirstOrDefault(n => n.Hwnd == foreground)
-                     ?? received.FirstOrDefault(n => n.Hwnd == _attached)
-                     ?? received.FirstOrDefault();
-        _attached = target?.Hwnd ?? IntPtr.Zero;
         UpdateFooter();
-
-        if (target is null)
-        {
-            ShowEmpty("온톡에서 받은 쪽지를 열면 여기에 표시됩니다.");
-        }
-        else if (target.Content.Note is not { } note)
-        {
-            ShowEmpty("이 쪽지 창의 내용을 읽지 못했습니다. 온톡 화면 구성이 달라졌을 수 있습니다.");
-        }
-        else
-        {
-            ShowNote(note, _saved.GetValueOrDefault(target.Hwnd));
-        }
+        ApplyCurrentContext(snapshot);
     }
 
     private void Collect(NoteWindow window)
@@ -259,11 +260,20 @@ public partial class PanelWindow : Window
     /// <summary>열려 있는 저장소와 그 저장소를 쓰는 창을 모두 닫는다. 다음 감시 주기에 계정을 다시 확인해 연다.</summary>
     private void CloseStore()
     {
+        _watcher.PermitAccount(null);
         _candidateAccount = null;
         _analysisCancel?.Cancel();
         _tasksWindow?.Close();
         _searchWindow?.Close();
         _composeWindow?.Close();
+        foreach (var pane in _composePanes.Values) pane.Dispose();
+        _composePanes.Clear();
+        _activePane = null;
+        _peoplePane = null;
+        _peoplePaneKey = null;
+        PeopleHost.Content = null;
+        _context = null;
+        _contextViewKey = null;
         _manageWindow?.Close();
         _store?.Dispose();
         _store = null;
@@ -348,6 +358,7 @@ public partial class PanelWindow : Window
             return;
         }
         SetStoreButtons(true);
+        _watcher.PermitAccount(account);
         EmbedPending();
         // 앱이 꺼져 있던 동안 지나간 알림을 모아서 보여 준다.
         Dispatcher.BeginInvoke(CheckReminders, DispatcherPriority.ApplicationIdle);
@@ -408,6 +419,12 @@ public partial class PanelWindow : Window
 
     private void ShowEmpty(string message)
     {
+        _activePane?.SetActive(false);
+        ComposeHost.Visibility = Visibility.Collapsed;
+        PeopleHost.Visibility = Visibility.Collapsed;
+        ContextView.Visibility = Visibility.Collapsed;
+        ContextHeader.Visibility = Visibility.Collapsed;
+        WindowSubtitle.Text = "온톡 작업 도우미";
         _shownKey = null;
         _shownNote = null;
         _shownNoteId = null;
@@ -430,6 +447,12 @@ public partial class PanelWindow : Window
         };
         if (_shownKey != note.Key)
         {
+            _analysisCancel?.Cancel();
+            SummarySection.Visibility = CandidateSection.Visibility = UncertainSection.Visibility = Visibility.Collapsed;
+            CandidateList.ItemsSource = null;
+            NoteTaskList.ItemsSource = null;
+            AnalysisStatusPanel.Visibility = Visibility.Visible;
+            AnalysisStatusText.Text = "현재 쪽지를 확인하는 중입니다.";
             // 같은 쪽지를 다시 그리면 사용자가 본문에서 선택·스크롤한 상태가 사라지므로 바뀔 때만 그린다.
             _shownKey = note.Key;
             _shownNote = note;
@@ -532,7 +555,7 @@ public partial class PanelWindow : Window
         {
             var analysis = await _analyzer.AnalyzeAsync(note, SentDate(note), cancel.Token);
             // 분석하는 사이 계정이 바뀌었으면 다른 계정 저장소에 쓰지 않는다.
-            if (store is not null && ReferenceEquals(store, _store))
+            if (store is not null && ReferenceEquals(store, _store) && !cancel.IsCancellationRequested)
             {
                 store.SaveAnalysis(noteId, _analyzer.Model, OllamaAnalyzer.PromptVersion, analysis, DateTimeOffset.Now);
             }
@@ -542,7 +565,7 @@ public partial class PanelWindow : Window
         }
         catch (AnalysisUnavailableException ex)
         {
-            _analysisErrors[noteId] = ex.Message;
+            if (ReferenceEquals(store, _store) && !cancel.IsCancellationRequested) _analysisErrors[noteId] = ex.Message;
         }
         finally
         {
@@ -553,7 +576,7 @@ public partial class PanelWindow : Window
             }
             cancel.Dispose();
         }
-        if (_shownNoteId == noteId)
+        if (ReferenceEquals(store, _store) && _shownNoteId == noteId)
         {
             RefreshWork();
         }
@@ -711,9 +734,21 @@ public partial class PanelWindow : Window
         }
     }
 
-    private void OnNewDraft(object sender, RoutedEventArgs e) => OpenCompose(null);
+    private void OnNewDraft(object sender, RoutedEventArgs e)
+    {
+        if (_context is { Context.Surface: OnTalkSurface.NoteCompose } current &&
+            _latestSnapshot?.Notes.FirstOrDefault(n => n.Hwnd == current.Hwnd && n.SessionId == current.SessionId) is { Content.Compose: { } state } note)
+        {
+            var target = new ComposeTarget(note.Hwnd, DescribeTarget(note.Content), state)
+            {
+                SessionId = note.SessionId, Kind = note.Content.ComposeKind
+            };
+            OpenCompose(null, target);
+        }
+        else OpenCompose(null);
+    }
 
-    private void OpenCompose(StoredNote? source)
+    private void OpenCompose(StoredNote? source, ComposeTarget? target = null, ContactPreparation? preparation = null)
     {
         if (_store is null)
         {
@@ -721,12 +756,20 @@ public partial class PanelWindow : Window
         }
         // 초안 창은 하나만 둔다. 닫을 때 쓰던 초안이 저장된다.
         _composeWindow?.Close();
-        _composeWindow = new ComposeWindow(_store, _writer, source);
+        var pane = target is not null ? _activePane : null;
+        pane?.SetActive(false);
+        if (pane is not null) pane.IsEnabled = false;
+        var window = _composeWindow = new ComposeWindow(_store, _writer, source, target, pane?.Draft, preparation);
         _composeWindow.Closed += (s, _) =>
         {
             if (ReferenceEquals(s, _composeWindow))
             {
                 _composeWindow = null;
+            }
+            if (pane is not null)
+            {
+                pane.RestoreDraft(window.Draft, window.Quote, window.QuoteIncluded);
+                pane.IsEnabled = true;
             }
         };
         _composeWindow.Show();
@@ -813,6 +856,14 @@ public partial class PanelWindow : Window
         {
             _dockedTo = _dock.Target;
             _forceExpanded = false;
+            _watcher.FollowTarget(_dockedTo);
+            _context = null;
+            _contextViewKey = null;
+            _manualMenu = MainMenu.Unknown;
+            _manualMenuWindow = IntPtr.Zero;
+            MenuPicker.SelectedIndex = 0;
+            ShowEmpty("현재 온톡 창의 작업을 확인하는 중입니다.");
+            if (_latestSnapshot is { } latest && _store is not null) ApplyCurrentContext(latest);
         }
         if (target is { } onTalk && (_dock.OnTalkForeground || _dock.OwnForeground || _pinnedOpen))
         {

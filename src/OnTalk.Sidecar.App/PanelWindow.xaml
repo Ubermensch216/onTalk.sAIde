@@ -92,7 +92,8 @@
                     </Border>
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Text="sAIde" Foreground="White" FontWeight="Bold" FontSize="15" />
-                        <TextBlock Text="온톡 옆의 쪽지 비서" Foreground="{StaticResource OnNavyMuted}" FontSize="11" />
+                        <TextBlock x:Name="WindowSubtitle" Text="온톡 작업 도우미" Foreground="{StaticResource OnNavyMuted}" FontSize="11"
+                                   MaxWidth="92" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                     </StackPanel>
                 </StackPanel>
             </DockPanel>
@@ -129,6 +130,25 @@
             </DockPanel>
         </Border>
 
+        <Border x:Name="ContextHeader" DockPanel.Dock="Top" Padding="14,10" Background="{StaticResource Surface}"
+                BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Visibility="Collapsed">
+            <StackPanel>
+                <TextBlock x:Name="ContextTitle" FontWeight="Bold" TextWrapping="Wrap" />
+                <TextBlock x:Name="ContextHint" Style="{StaticResource Small}" Margin="0,4,0,0" />
+                <StackPanel x:Name="ManualMenuPanel" Visibility="Collapsed" Margin="0,8,0,0">
+                    <TextBlock Text="메뉴를 읽지 못하면 직접 지정" Style="{StaticResource Caption}" />
+                    <ComboBox x:Name="MenuPicker" SelectedIndex="0" SelectionChanged="OnManualMenuChanged">
+                        <ComboBoxItem Content="자동 감지" Tag="Unknown" />
+                        <ComboBoxItem Content="친구" Tag="Friends" />
+                        <ComboBoxItem Content="조직도" Tag="Organization" />
+                        <ComboBoxItem Content="대화" Tag="Conversations" />
+                        <ComboBoxItem Content="쪽지" Tag="Notes" />
+                        <ComboBoxItem Content="사용자 검색·알리미 (지원 제외)" Tag="Excluded" />
+                    </ComboBox>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
         <!-- 발아래 -->
         <Border DockPanel.Dock="Bottom" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}"
                 BorderThickness="0,1,0,0" Padding="14,7">
@@ -141,6 +161,29 @@
         </Border>
 
         <Grid>
+            <ScrollViewer x:Name="ContextView" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="12">
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock x:Name="ContextPurpose" Style="{StaticResource Body}" />
+                            <TextBlock x:Name="ContextTools" Style="{StaticResource Small}" Margin="0,10,0,0" />
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="LocalGroupsPanel" Style="{StaticResource Card}" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="사이드카의 로컬 그룹" Style="{StaticResource SectionTitle}" />
+                            <ComboBox x:Name="ContextGroups" DisplayMemberPath="Label" SelectionChanged="OnContextGroupChanged" />
+                            <TextBlock x:Name="ContextMembers" Style="{StaticResource Small}" Margin="0,8,0,0" />
+                        </StackPanel>
+                    </Border>
+                    <TextBlock x:Name="ContextScope" Style="{StaticResource Small}" Margin="2,4,2,12" />
+                    <Button x:Name="ContextPrimary" Content="새 쪽지 준비" Style="{StaticResource PrimaryButton}" Click="OnContextPrimary" />
+                    <Button x:Name="ContextSearch" Content="보관한 쪽지에서 찾기" Margin="0,8,0,0" Click="OnOpenSearch" />
+                </StackPanel>
+            </ScrollViewer>
+            <ContentControl x:Name="ComposeHost" Visibility="Collapsed" />
+            <ContentControl x:Name="PeopleHost" Visibility="Collapsed" />
+
             <!-- 아직 쪽지가 없을 때 -->
             <StackPanel x:Name="EmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="28,0,28,40">
                 <Border Width="64" Height="64" CornerRadius="32" Background="{StaticResource AccentSoft}"

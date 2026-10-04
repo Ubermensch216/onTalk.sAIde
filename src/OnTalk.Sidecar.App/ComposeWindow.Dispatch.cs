@@ -39,7 +39,8 @@ public partial class ComposeWindow
 
     private void EnableControls()
     {
-        var ready = !_busy && _target != IntPtr.Zero;
+        var ready = !_closed && !_busy && _target != IntPtr.Zero && _state?.DialogOpen == false;
+        TargetBox.IsEnabled = !_busy && _lockedTarget is null;
         ApplyButton.IsEnabled = ready;
         SendButton.IsEnabled = ready;
         OnTalkControls.IsEnabled = ready;

@@ -13,7 +13,10 @@ public enum NoteWindowKind
 
 /// <param name="Note">받은 쪽지를 끝까지 해석했을 때만 값이 있다.</param>
 /// <param name="Compose">작성 창을 끝까지 해석했을 때만 값이 있다.</param>
-public sealed record NoteWindowContent(NoteWindowKind Kind, string Title, ReceivedNote? Note, ComposeState? Compose = null);
+public sealed record NoteWindowContent(NoteWindowKind Kind, string Title, ReceivedNote? Note, ComposeState? Compose = null)
+{
+    public NoteComposeKind ComposeKind { get; init; }
+}
 
 /// <summary>온톡 작성 창(새 쪽지·답장·전달)의 현재 상태.</summary>
 /// <param name="Recipients">수신자 이름. 온톡 작성 창은 이름만 보여 주므로 동명이인은 구분되지 않는다.</param>
@@ -50,7 +53,15 @@ public static class NoteWindowParser
         var title = root.StaticTexts().FirstOrDefault(t => !ModeToggles.Contains(t)) ?? "";
         if (root.StaticTexts().Any(IsByteCounter))
         {
-            return new NoteWindowContent(NoteWindowKind.Compose, title, null, ParseCompose(root));
+            return new NoteWindowContent(NoteWindowKind.Compose, title, null, ParseCompose(root))
+            {
+                ComposeKind = title.Trim() switch
+                {
+                    "새 쪽지" => NoteComposeKind.New, "답장" => NoteComposeKind.Reply,
+                    "전체답장" or "전체 답장" => NoteComposeKind.ReplyAll,
+                    "전달" => NoteComposeKind.Forward, _ => NoteComposeKind.Unknown
+                }
+            };
         }
         if (title != ReceivedTitle)
         {

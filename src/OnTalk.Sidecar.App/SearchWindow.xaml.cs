@@ -20,6 +20,8 @@ public partial class SearchWindow : Window
     private readonly ProfileStore _store;
     private readonly OllamaEmbedder _embedder;
     private CancellationTokenSource? _semanticCancel;
+    private StoredNote? _contactCandidate;
+    private bool _settingContactCandidate;
 
     public SearchWindow(ProfileStore store, OllamaEmbedder embedder)
     {
@@ -34,12 +36,24 @@ public partial class SearchWindow : Window
         Closed += (_, _) => _semanticCancel?.Cancel();
     }
 
-    private void OnSearch(object sender, RoutedEventArgs e) => Search();
+    private void OnSearch(object sender, RoutedEventArgs e) { _contactCandidate = null; Search(); }
+
+    public void ShowContactCandidate(StoredNote note)
+    {
+        _contactCandidate = note;
+        _settingContactCandidate = true;
+        QueryBox.Text = note.Note.SenderName;
+        Period.SelectedIndex = 0;
+        AttachmentOnly.IsChecked = false;
+        _settingContactCandidate = false;
+        Search();
+    }
 
     private void OnPeriodChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (IsLoaded)
+        if (IsLoaded && !_settingContactCandidate)
         {
+            _contactCandidate = null;
             Search();
         }
     }
@@ -71,10 +85,17 @@ public partial class SearchWindow : Window
         var now = DateTimeOffset.Now;
         rows.AddRange(_store.SearchTasks(terms).Select(t => new SearchRow(
             $"업무 · {t.Title}", new TaskRow(t, now).DueLine, "글자 일치", null, t)));
+        if (_contactCandidate is { } contact)
+        {
+            rows.RemoveAll(r => r.Note?.Id == contact.Id);
+            rows.Insert(0, NoteRow(contact, terms, "발신자 이름 일치 · 신원 미확인"));
+        }
         Results.ItemsSource = rows;
+        if (_contactCandidate is { } candidate)
+            Results.SelectedItem = rows.FirstOrDefault(r => r.Note?.Id == candidate.Id);
         StatusText.Text = terms.Count == 0 ? $"최근 쪽지 {rows.Count}건" : $"글자 일치 {rows.Count}건";
 
-        if (terms.Count > 0)
+        if (terms.Count > 0 && _contactCandidate is null)
         {
             SearchByMeaning(QueryBox.Text.Trim(), query, rows, notes.Select(n => n.Id).ToHashSet());
         }
@@ -144,6 +165,7 @@ public partial class SearchWindow : Window
                 { } t => $"{t.Value:yyyy-MM-dd HH:mm}",
             });
             DetailNotice.Text = $"{stored.FirstSeenAt.ToLocalTime():yyyy-MM-dd HH:mm}에 보관한 사본입니다. 온톡의 원본은 이미 삭제되었을 수 있습니다.";
+            if (_contactCandidate?.Id == stored.Id) DetailNotice.Text += " 발신자 이름이 일치하는 후보입니다. 같은 사람인지 소속·원문을 확인하세요.";
             DetailBody.Text = note.Body;
             DetailAttachments.Text = note.AttachmentNames.Count > 0
                 ? $"첨부 파일 이름: {string.Join(", ", note.AttachmentNames)}"

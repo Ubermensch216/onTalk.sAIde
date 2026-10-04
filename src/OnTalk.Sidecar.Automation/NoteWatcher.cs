@@ -1,12 +1,26 @@
 using System.Diagnostics;
+using OnTalk.Sidecar.Core;
 
 namespace OnTalk.Sidecar.Automation;
 
-public sealed record NoteWindow(IntPtr Hwnd, NoteWindowContent Content);
+public sealed record NoteWindow(IntPtr Hwnd, NoteWindowContent Content)
+{
+    public Guid SessionId { get; init; }
+}
+
+public sealed record WindowContext(IntPtr Hwnd, Guid SessionId, SidecarContext Context)
+{
+    public PeopleSnapshot? People { get; init; }
+}
 
 /// <param name="OnTalkRunning">온톡 프로세스가 있는지.</param>
 /// <param name="Notes">지금 화면에 보이는 쪽지 창.</param>
-public sealed record WatchSnapshot(bool OnTalkRunning, IReadOnlyList<NoteWindow> Notes);
+public sealed record WatchSnapshot(bool OnTalkRunning, IReadOnlyList<NoteWindow> Notes)
+{
+    public string? AccountCandidate { get; init; }
+    public IReadOnlyList<WindowContext> Contexts { get; init; } = [];
+    public WindowContext? ForTarget(IntPtr hwnd) => Contexts.FirstOrDefault(c => c.Hwnd == hwnd);
+}
 
 /// <summary>
 /// 온톡의 보이는 쪽지 창을 주기적으로 읽는다. 온톡을 조작하지 않는다.
@@ -19,9 +33,14 @@ public sealed class NoteWatcher : IDisposable
 
     private readonly CancellationTokenSource _stop = new();
     private readonly Thread _thread;
-    // 쪽지 페이지가 아닌 창(메인 창은 요소가 400개가 넘는다)을 매번 다시 읽지 않기 위한 기록.
-    private readonly HashSet<IntPtr> _notNotePages = [];
     private readonly HashSet<IntPtr> _activated = [];
+    private readonly WindowSessionTracker _sessions = new();
+    private string? _sessionAccount;
+    private IntPtr _target;
+    private string? _permittedAccount;
+
+    public void FollowTarget(IntPtr hwnd) => Interlocked.Exchange(ref _target, hwnd);
+    public void PermitAccount(string? account) => Volatile.Write(ref _permittedAccount, account);
 
     public event Action<WatchSnapshot>? Updated;
 
@@ -44,7 +63,7 @@ public sealed class NoteWatcher : IDisposable
             catch (Exception)
             {
                 // 읽는 도중 창이 닫히는 등의 일시 오류. 다음 주기에 다시 읽는다.
-                snapshot = new WatchSnapshot(true, []);
+                snapshot = new WatchSnapshot(true, []) { AccountCandidate = OnTalkAccount.DetectCandidate() };
             }
             Updated?.Invoke(snapshot);
             _stop.Token.WaitHandle.WaitOne(Interval);
@@ -53,15 +72,24 @@ public sealed class NoteWatcher : IDisposable
 
     private WatchSnapshot Scan()
     {
-        var pids = Process.GetProcessesByName(ProcessName).Select(p => (uint)p.Id).ToHashSet();
+        var pids = new HashSet<uint>();
+        foreach (var process in Process.GetProcessesByName(ProcessName))
+        {
+            using (process) pids.Add((uint)process.Id);
+        }
         if (pids.Count == 0)
         {
-            _notNotePages.Clear();
             _activated.Clear();
+            _sessions.Clear();
             return new WatchSnapshot(false, []);
         }
 
-        var candidates = new List<(IntPtr Hwnd, IntPtr Render)>();
+        var account = OnTalkAccount.DetectCandidate();
+        if (_sessionAccount != account) { _sessions.Clear(); _sessionAccount = account; }
+        var permitted = Volatile.Read(ref _permittedAccount);
+        var readContent = permitted is not null && account == permitted;
+        var target = Interlocked.CompareExchange(ref _target, IntPtr.Zero, IntPtr.Zero);
+        var candidates = new List<(IntPtr Hwnd, IntPtr Render, uint Pid)>();
         Win32.EnumWindows((hwnd, _) =>
         {
             Win32.GetWindowThreadProcessId(hwnd, out var pid);
@@ -69,22 +97,19 @@ public sealed class NoteWatcher : IDisposable
                 Win32.ClassName(hwnd).StartsWith("Chrome_WidgetWin", StringComparison.Ordinal) &&
                 Win32.FindRenderChild(hwnd) is { } render)
             {
-                candidates.Add((hwnd, render));
+                candidates.Add((hwnd, render, pid));
             }
             return true;
         }, IntPtr.Zero);
 
-        _notNotePages.RemoveWhere(h => !Win32.IsWindow(h));
+        _sessions.RemoveMissing(Win32.IsWindow);
         _activated.RemoveWhere(h => !Win32.IsWindow(h));
 
         var notes = new List<NoteWindow>();
+        var contexts = new List<WindowContext>();
         var now = DateTimeOffset.Now;
-        foreach (var (hwnd, render) in candidates)
+        foreach (var (hwnd, render, pid) in candidates.OrderBy(c => c.Hwnd == target ? 0 : 1))
         {
-            if (_notNotePages.Contains(hwnd))
-            {
-                continue;
-            }
             if (_activated.Add(render))
             {
                 Win32.SendMessageTimeoutW(render, Win32.WM_GETOBJECT, IntPtr.Zero,
@@ -98,15 +123,37 @@ public sealed class NoteWatcher : IDisposable
             }
             if (!NoteWindowParser.IsNotePage(root))
             {
-                _notNotePages.Add(hwnd);
+                if (hwnd == target)
+                {
+                    // 위치 감시(100ms)와 분리한다. 메인 트리는 활성 대상에서만 읽는다.
+                    var tree = readContent ? MsaaReader.ReadTree(render, readEditableValues: false) : null;
+                    var context = WindowContextParser.Parse(tree ?? root);
+                    var session = _sessions.Observe(hwnd, render, pid, context);
+                    contexts.Add(new WindowContext(hwnd, session, context)
+                    {
+                        People = tree is not null && context.Surface == OnTalkSurface.Main && context.Menu is Core.MainMenu.Friends or Core.MainMenu.Organization
+                            ? MainPeopleParser.Parse(tree, context.Menu, now) : null
+                    });
+                    if (context.Surface == OnTalkSurface.Login) break;
+                }
                 continue;
             }
-            if (MsaaReader.ReadTree(render) is { } tree)
+            if (readContent && MsaaReader.ReadTree(render) is { } noteTree)
             {
-                notes.Add(new NoteWindow(hwnd, NoteWindowParser.Parse(tree, now)));
+                var content = NoteWindowParser.Parse(noteTree, now);
+                var context = WindowContextParser.Parse(root, content);
+                var session = _sessions.Observe(hwnd, render, pid, context, content);
+                notes.Add(new NoteWindow(hwnd, content) { SessionId = session });
+                contexts.Add(new WindowContext(hwnd, session, context));
             }
         }
-        return new WatchSnapshot(true, notes);
+        // 읽는 사이 계정 후보가 바뀌었으면 그 자료를 새 계정에 넘기지 않는다.
+        var afterAccount = OnTalkAccount.DetectCandidate();
+        return new WatchSnapshot(true, account == afterAccount ? notes : [])
+        {
+            AccountCandidate = afterAccount,
+            Contexts = account == afterAccount ? contexts : []
+        };
     }
 
     public void Dispose()

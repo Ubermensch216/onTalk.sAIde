@@ -21,6 +21,8 @@ public sealed record AccNode(string Role, string Name, string Value, int State, 
     public const string Graphic = "graphic";
 
     public const int StateChecked = 0x10;
+    public const int StateSelected = 0x2;
+    public const int StatePressed = 0x8;
 
     public AccBounds Bounds { get; init; }
 
@@ -29,6 +31,7 @@ public sealed record AccNode(string Role, string Name, string Value, int State, 
 
     /// <summary>클릭 같은 기본 동작이 있는지.</summary>
     public bool HasAction { get; init; }
+    public bool IsTruncated { get; init; }
 
     public IEnumerable<AccNode> DescendantsAndSelf()
     {

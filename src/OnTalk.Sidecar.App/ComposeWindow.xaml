@@ -3,12 +3,20 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="작성 도우미 · onTalk.sAIde" Width="680" Height="780" MinWidth="640" MinHeight="520"
         Style="{StaticResource AppWindow}" WindowStartupLocation="CenterScreen">
+    <ScrollViewer Background="{StaticResource PageBg}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
     <DockPanel>
         <!-- 위: 어느 쪽지에, 누구에게 -->
         <Border DockPanel.Dock="Top" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}"
                 BorderThickness="0,0,0,1" Padding="22,16,22,14">
             <StackPanel>
                 <TextBlock x:Name="SourceText" Style="{StaticResource PageTitle}" FontSize="15" TextWrapping="Wrap" />
+                <Expander x:Name="PreparedContacts" Header="연락 준비 대상 · 실제 수신자 확인 필요" Visibility="Collapsed" IsExpanded="True" Margin="0,8,0,0">
+                    <StackPanel Margin="0,8,0,0">
+                        <ComboBox x:Name="PreparedPerson" DisplayMemberPath="Label" SelectionChanged="OnPreparedPersonChanged" />
+                        <TextBlock x:Name="PreparedNotice" Style="{StaticResource Caption}" Margin="0,6,0,0" />
+                        <TextBlock Text="아래 받는 사람 검색에서 이름·소속을 확인한 뒤 직접 추가하세요. 준비 대상은 아직 수신자로 추가되지 않았습니다." Style="{StaticResource Caption}" Margin="0,6,0,0" />
+                    </StackPanel>
+                </Expander>
                 <Grid Margin="0,12,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="92" />
@@ -78,7 +86,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="예약 전송" VerticalAlignment="Center" Foreground="{StaticResource Muted}" />
-                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <WrapPanel Grid.Column="1">
                             <DatePicker x:Name="ReserveDate" Width="136" />
                             <ComboBox x:Name="ReserveHour" Width="66" Padding="10,0,22,0" Margin="8,0,0,0" />
                             <TextBlock Text="시" VerticalAlignment="Center" Margin="6,0,0,0" />
@@ -86,7 +94,7 @@
                             <TextBlock Text="분" VerticalAlignment="Center" Margin="6,0,0,0" />
                             <Button x:Name="ReserveButton" Content="온톡에 설정" Margin="12,0,0,0" Click="OnSetReservation" />
                             <Button x:Name="UnreserveButton" Content="예약 풀기" Margin="6,0,0,0" Click="OnCancelReservation" />
-                        </StackPanel>
+                        </WrapPanel>
                     </Grid>
                     <TextBlock x:Name="ControlStatus" Style="{StaticResource StatusSmall}" Margin="92,6,0,0" />
                 </StackPanel>
@@ -119,16 +127,30 @@
                         CornerRadius="12" Padding="12,10">
                     <StackPanel>
                         <DockPanel>
-                            <Button x:Name="AiButton" DockPanel.Dock="Right" Content="AI로 쓰기"
+                            <Button x:Name="AiButton" DockPanel.Dock="Right" Content="AI로 제안"
                                     Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" Click="OnAiWrite" />
                             <TextBox x:Name="AiInstruction" Tag="이렇게 써 줘: 15일까지 이수하겠다고 정중히" />
                         </DockPanel>
                         <TextBlock x:Name="AiStatus" Style="{StaticResource Caption}" Margin="2,8,0,0"
-                                   Text="요청을 적으면 로컬 AI가 초안을 씁니다. 이미 쓴 글이 있으면 그 글을 고칩니다." />
+                                   Text="요청을 적으면 로컬 AI가 초안을 제안합니다. 내용을 비교하고 수락하면 편집기에 적용합니다." />
+                        <StackPanel x:Name="AiReview" Visibility="Collapsed" Margin="0,8,0,0">
+                            <TextBox x:Name="AiProposal" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                                     Height="110" VerticalScrollBarVisibility="Auto" />
+                            <Button x:Name="AcceptAiButton" Content="제안을 초안에 적용" HorizontalAlignment="Left" Margin="0,6,0,0" Click="OnAcceptAi" />
+                        </StackPanel>
+                        <Button x:Name="UndoButton" Content="되돌리기" IsEnabled="False" HorizontalAlignment="Left" Margin="0,6,0,0" Click="OnUndo" />
                     </StackPanel>
                 </Border>
             </StackPanel>
         </Border>
+
+        <Expander Header="보관한 초안 불러오기" DockPanel.Dock="Top" Margin="22,12,22,0">
+            <StackPanel Margin="0,8,0,4">
+                <ComboBox x:Name="RecentDrafts" DisplayMemberPath="Label" />
+                <Button Content="선택한 초안의 본문 가져오기" Click="OnLoadDraft" HorizontalAlignment="Left" Margin="0,6,0,0" />
+                <TextBlock Text="본문만 가져옵니다. 받는 사람은 현재 온톡 창에서 다시 확인하세요." Style="{StaticResource Caption}" Margin="0,4,0,0" />
+            </StackPanel>
+        </Expander>
 
         <!-- 문구 -->
         <Grid DockPanel.Dock="Top" Margin="22,14,22,8">
@@ -147,6 +169,7 @@
         </Grid>
 
         <TextBox x:Name="Editor" Style="{StaticResource MultilineBox}" Margin="22,0,22,12" AcceptsTab="False"
-                 FontSize="14" TextChanged="OnEditorChanged" Tag="여기에 쪽지 내용을 씁니다" />
+                 FontSize="14" MinHeight="180" TextChanged="OnEditorChanged" Tag="여기에 쪽지 내용을 씁니다" />
     </DockPanel>
+    </ScrollViewer>
 </Window>

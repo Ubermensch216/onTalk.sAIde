@@ -16,20 +16,23 @@ internal static class MsaaReader
         [0x0F] = AccNode.Document, [0x1E] = "link", [0x21] = "list", [0x22] = AccNode.ListItem, [0x18] = "table",
         [0x28] = "graphic", [0x29] = AccNode.StaticText, [0x2A] = AccNode.EditableText, [0x2B] = "pushbutton",
         [0x2C] = AccNode.CheckBox, [0x2E] = AccNode.ComboBox, [0x3B] = AccNode.Whitespace, [0x1D] = AccNode.Cell,
+        [0x25] = "pagetab",
+        [0x23] = "outline", [0x24] = "outlineitem", [0x0D] = "tooltip",
     };
 
     /// <summary>루트 요소만 읽는다. 창 종류 판별용.</summary>
     public static AccNode? ReadRoot(IntPtr renderHwnd) =>
         Root(renderHwnd) is { } acc ? Read(acc, [], "") : null;
 
-    public static AccNode? ReadTree(IntPtr renderHwnd)
+    public static AccNode? ReadTree(IntPtr renderHwnd, bool readEditableValues = true)
     {
         if (Root(renderHwnd) is not { } root)
         {
             return null;
         }
         var budget = MaxNodes;
-        return ReadSubtree(root, "", ref budget);
+        var tree = ReadSubtree(root, "", ref budget, readEditableValues);
+        return tree with { IsTruncated = budget <= 0 };
     }
 
     /// <summary>
@@ -91,7 +94,7 @@ internal static class MsaaReader
             : null;
     }
 
-    private static AccNode ReadSubtree(IAccessible acc, string path, ref int budget)
+    private static AccNode ReadSubtree(IAccessible acc, string path, ref int budget, bool readEditableValues)
     {
         budget--;
         var children = new List<AccNode>();
@@ -106,15 +109,15 @@ internal static class MsaaReader
                     // 정수 자식 ID(단순 요소)는 Chromium 웹 콘텐츠에서 쓰이지 않는다.
                     if (raw[i] is IAccessible child)
                     {
-                        children.Add(ReadSubtree(child, path.Length == 0 ? $"{i}" : $"{path}/{i}", ref budget));
+                        children.Add(ReadSubtree(child, path.Length == 0 ? $"{i}" : $"{path}/{i}", ref budget, readEditableValues));
                     }
                 }
             }
         }
-        return Read(acc, children, path);
+        return Read(acc, children, path, readEditableValues);
     }
 
-    private static AccNode Read(IAccessible acc, IReadOnlyList<AccNode> children, string path)
+    private static AccNode Read(IAccessible acc, IReadOnlyList<AccNode> children, string path, bool readEditableValues = true)
     {
         var role = Safe(() => acc.get_accRole(Self)) switch
         {
@@ -135,7 +138,7 @@ internal static class MsaaReader
         return new AccNode(
             role,
             Safe(() => acc.get_accName(Self)) ?? "",
-            Safe(() => acc.get_accValue(Self)) ?? "",
+            !readEditableValues && role == AccNode.EditableText ? "" : Safe(() => acc.get_accValue(Self)) ?? "",
             Safe(() => acc.get_accState(Self)) is int state ? state : 0,
             children) { Bounds = bounds, Path = path, HasAction = (Safe(() => acc.get_accDefaultAction(Self)) ?? "").Length > 0 };
     }

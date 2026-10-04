@@ -47,6 +47,7 @@ if (command == "soak")
 {
     // 감시 루프의 메모리 사용을 본다.
     using var watcher = new NoteWatcher();
+    watcher.PermitAccount(OnTalkAccount.DetectCandidate());
     var ticks = 0;
     watcher.Updated += _ => Interlocked.Increment(ref ticks);
     watcher.Start();
@@ -340,6 +341,7 @@ if (command == "semantic")
 if (command == "analyze")
 {
     using var watcher = new NoteWatcher();
+    watcher.PermitAccount(OnTalkAccount.DetectCandidate());
     using var done = new ManualResetEventSlim();
     WatchSnapshot? snapshot = null;
     watcher.Updated += s =>
@@ -435,6 +437,7 @@ switch (command)
 int Notes()
 {
     using var watcher = new NoteWatcher();
+    watcher.PermitAccount(OnTalkAccount.DetectCandidate());
     using var done = new ManualResetEventSlim();
     WatchSnapshot? snapshot = null;
     watcher.Updated += s =>

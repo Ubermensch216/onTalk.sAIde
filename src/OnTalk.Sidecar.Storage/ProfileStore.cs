@@ -6,6 +6,7 @@ using OnTalk.Sidecar.Core;
 namespace OnTalk.Sidecar.Storage;
 
 public sealed record SaveResult(long NoteId, bool IsNew, DateTimeOffset FirstSeenAt);
+public sealed record StoredDraft(string Slot, string Body, DateTimeOffset UpdatedAt);
 
 /// <summary>
 /// 온톡 계정 하나의 저장소. 계정마다 폴더와 암호화 키가 따로 있어 다른 계정 자료와 섞이지 않는다.
@@ -13,7 +14,7 @@ public sealed record SaveResult(long NoteId, bool IsNew, DateTimeOffset FirstSee
 /// </summary>
 public sealed partial class ProfileStore : IDisposable
 {
-    private const int SchemaVersion = 6;
+    private const int SchemaVersion = 7;
     private readonly SqliteConnection _db;
 
     public string LoginId { get; }
@@ -228,6 +229,22 @@ public sealed partial class ProfileStore : IDisposable
                     details  TEXT NOT NULL
                 );
                 PRAGMA user_version = 6;
+                COMMIT;
+                """);
+        }
+        if (version < 7)
+        {
+            Execute(db, """
+                BEGIN;
+                CREATE TABLE contact_preparation_group (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    people_json TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                PRAGMA user_version = 7;
                 COMMIT;
                 """);
         }
@@ -531,6 +548,15 @@ public sealed partial class ProfileStore : IDisposable
     {
         using var cmd = Command("SELECT body FROM draft WHERE slot = $slot", ("$slot", slot));
         return cmd.ExecuteScalar() as string;
+    }
+
+    public List<StoredDraft> GetDrafts(int limit = 50)
+    {
+        using var cmd = Command("SELECT slot, body, updated_at FROM draft ORDER BY julianday(updated_at) DESC, slot LIMIT $limit", ("$limit", limit));
+        using var reader = cmd.ExecuteReader();
+        var drafts = new List<StoredDraft>();
+        while (reader.Read()) drafts.Add(new StoredDraft(reader.GetString(0), reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2))));
+        return drafts;
     }
 
     /// <summary>초안을 저장한다. 빈 초안은 자리를 지운다.</summary>

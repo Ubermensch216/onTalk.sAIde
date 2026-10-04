@@ -10,7 +10,18 @@ using OnTalk.Sidecar.Storage;
 namespace OnTalk.Sidecar.App;
 
 /// <summary>반영 대상으로 고를 수 있는 온톡 작성 창.</summary>
-public sealed record ComposeTarget(IntPtr Hwnd, string Label, ComposeState State);
+public sealed record ComposeTarget(IntPtr Hwnd, string Label, ComposeState State)
+{
+    public Guid SessionId { get; init; }
+    public NoteComposeKind Kind { get; init; }
+    public override string ToString() => Label;
+}
+
+public sealed record DraftChoice(StoredDraft Draft)
+{
+    public string Label => $"{Draft.UpdatedAt.ToLocalTime():MM-dd HH:mm} · {Snippet.Make(Draft.Body, [], 25)}";
+    public override string ToString() => Label;
+}
 
 /// <summary>
 /// 초안을 쓰고 온톡 작성 창에 반영한다. 초안은 계정 저장소에 자동 저장된다.
@@ -32,41 +43,70 @@ public partial class ComposeWindow : Window
     private bool _busy;
     private ComposeState? _state;
     private string _conflictNote = "";
+    private readonly ComposeTarget? _lockedTarget;
+    private Guid _targetSession;
+    private long _revision;
+    private long _proposalRevision;
+    private bool _closed;
+    private readonly Stack<(string Message, string Quote, bool IncludeQuote)> _history = [];
 
-    public ComposeWindow(ProfileStore store, OllamaWriter writer, StoredNote? source)
+    public ComposeWindow(ProfileStore store, OllamaWriter writer, StoredNote? source, ComposeTarget? target = null,
+        string? initialText = null, ContactPreparation? preparation = null)
     {
         InitializeComponent();
         _store = store;
         _writer = writer;
         _source = source;
-        _slot = source is null ? DraftText.NewSlot : DraftText.ReplySlot(source.Id);
-        SourceText.Text = source is null
+        _lockedTarget = target;
+        _slot = target is null ? $"draft:{Guid.NewGuid():N}" : ContextDrafts.Slot(target.SessionId, target.Kind) + ":expanded";
+        SourceText.Text = target is not null ? SidecarPolicy.ComposeTitle(target.Kind) : source is null
             ? "새 쪽지 초안"
             : $"답장 초안 · {source.Note.SenderName} ({source.Note.SentAt?.Value.ToString("yyyy-MM-dd") ?? source.Note.SentAtText})";
-        Editor.Text = store.GetDraft(_slot) ?? "";
+        Editor.Text = initialText ?? store.GetDraft(_slot) ?? preparation?.InitialDraft ?? "";
         ReloadTemplates();
+        RecentDrafts.ItemsSource = store.GetDrafts().Where(d => d.Slot != _slot).Select(d => new DraftChoice(d)).ToList();
         InitializeDispatchControls();
+        if (preparation is not null)
+        {
+            SourceText.Text = $"{preparation.Purpose} · 연락 후보 {preparation.People.Count}명";
+            PreparedContacts.Visibility = Visibility.Visible;
+            PreparedNotice.Text = $"{preparation.Source}\n{preparation.ObservedAt.ToLocalTime():yyyy-MM-dd HH:mm} 당시 정보\n{ContactSupport.IdentityWarning(preparation.People)}";
+            PreparedPerson.ItemsSource = preparation.People;
+            PreparedPerson.SelectedIndex = 0;
+        }
         UpdateTargets([]);
+        if (target is not null) UpdateTargets([target]);
         UpdateBytes();
         _autosave.Tick += (_, _) => SaveDraft();
         Loaded += (_, _) => Editor.Focus();
         Closed += (_, _) =>
         {
+            _closed = true;
             _closing.Cancel();
             SaveDraft();
         };
     }
 
     private string Final => DraftText.JoinQuote(Editor.Text, IncludeQuote.IsChecked == true ? _quote : "");
+    public string Draft => Editor.Text;
+    public string Quote => _quote;
+    public bool QuoteIncluded => IncludeQuote.IsChecked == true;
+    public Guid? BoundSession => _lockedTarget?.SessionId;
 
     /// <summary>패널이 감시 주기마다 호출한다. 지금 열려 있는 온톡 작성 창 목록.</summary>
     public void UpdateTargets(IReadOnlyList<ComposeTarget> targets)
     {
+        if (_lockedTarget is { } locked)
+        {
+            targets = targets.Where(t => t.Hwnd == locked.Hwnd && t.SessionId == locked.SessionId && t.Kind == locked.Kind).ToList();
+            TargetBox.IsEnabled = false;
+        }
         var current = TargetBox.ItemsSource as IReadOnlyList<ComposeTarget> ?? [];
-        if (!current.Select(t => (t.Hwnd, t.Label)).SequenceEqual(targets.Select(t => (t.Hwnd, t.Label))))
+        if (!current.Select(t => (t.Hwnd, t.SessionId, t.Kind, t.Label)).SequenceEqual(targets.Select(t => (t.Hwnd, t.SessionId, t.Kind, t.Label))))
         {
             TargetBox.ItemsSource = targets;
-            TargetBox.SelectedItem = targets.FirstOrDefault(t => t.Hwnd == _target) ?? targets.FirstOrDefault();
+            TargetBox.SelectedItem = targets.FirstOrDefault(t => t.Hwnd == _target && t.SessionId == _targetSession)
+                ?? (_lockedTarget is null ? null : targets.FirstOrDefault());
         }
         if (targets.Count == 0)
         {
@@ -76,17 +116,28 @@ public partial class ComposeWindow : Window
                 : "열려 있는 온톡 작성 창이 없습니다. 온톡 받은 쪽지 창에서 답장을 누르면 여기에 나타납니다.";
         }
         _state = targets.FirstOrDefault(t => t.Hwnd == _target)?.State;
+        if (_state is null) _target = IntPtr.Zero;
+        if (_target == IntPtr.Zero && _targetSession != Guid.Empty)
+        {
+            _targetSession = Guid.Empty;
+            InvalidateProposal();
+        }
         RefreshHint();
         EnableControls();
     }
 
     private void OnTargetChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (TargetBox.SelectedItem is not ComposeTarget target || target.Hwnd == _target)
+        if (TargetBox.SelectedItem is not ComposeTarget target || (target.Hwnd == _target && target.SessionId == _targetSession))
         {
             return;
         }
         _target = target.Hwnd;
+        _targetSession = target.SessionId;
+        InvalidateProposal();
+        _picked.Clear();
+        _searchWindow = IntPtr.Zero;
+        CandidatePanel.Visibility = Visibility.Collapsed;
         _state = target.State;
         Adopt(target.State, importMessage: Editor.Text.Length == 0);
         EnableControls();
@@ -116,7 +167,7 @@ public partial class ComposeWindow : Window
         UpdateBytes();
     }
 
-    private void OnQuoteToggled(object sender, RoutedEventArgs e) => UpdateBytes();
+    private void OnQuoteToggled(object sender, RoutedEventArgs e) { InvalidateProposal(); UpdateBytes(); }
 
     private void OnEditorChanged(object sender, TextChangedEventArgs e)
     {
@@ -125,6 +176,7 @@ public partial class ComposeWindow : Window
             return;
         }
         UpdateBytes();
+        InvalidateProposal();
         _autosave.Stop();
         _autosave.Start();
     }
@@ -164,6 +216,8 @@ public partial class ComposeWindow : Window
     private async Task<bool> ApplyAsync(string final, string expected, bool askOnConflict)
     {
         var hwnd = _target;
+        var session = _targetSession;
+        if (hwnd == IntPtr.Zero || _closed) return false;
         _busy = true;
         EnableControls();
         Result("온톡 창에 반영하는 중", ok: true);
@@ -173,11 +227,18 @@ public partial class ComposeWindow : Window
             // 클릭·붙여넣기·다시 읽기에 1~2초 걸리므로 화면이 멈추지 않게 따로 돌린다.
             result = await Task.Run(() => ComposeWriter.ApplyBody(hwnd, final, expected));
         }
+        catch (Exception ex)
+        {
+            if (!_closed) Result($"반영을 확인하지 못했습니다. 온톡 창을 확인하세요. {ex.Message}", ok: false);
+            return false;
+        }
         finally
         {
             _busy = false;
             EnableControls();
         }
+
+        if (_closed || _target != hwnd || _targetSession != session) return false;
 
         if (result.Status == ApplyStatus.Conflict && result.After is { } current && askOnConflict)
         {
@@ -188,6 +249,8 @@ public partial class ComposeWindow : Window
                 "내용이 다릅니다", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel);
             if (choice == MessageBoxResult.Yes)
             {
+                Remember();
+                InvalidateProposal();
                 Editor.Clear();
                 Adopt(current, importMessage: true);
                 Result("온톡 창의 글을 편집기로 가져왔습니다.", ok: true);
@@ -249,17 +312,24 @@ public partial class ComposeWindow : Window
         AiButton.IsEnabled = false;
         AiStatus.Text = "로컬 AI가 쓰는 중입니다. 수십 초 걸릴 수 있습니다.";
         var before = Editor.Text;
+        var revision = _revision;
         try
         {
-            var text = await _writer.WriteAsync(_source?.Note, before, AiInstruction.Text, _closing.Token);
-            if (Editor.Text != before)
+            var text = _lockedTarget is { } locked
+                ? await _writer.SuggestAsync(locked.Kind, before, _quote, AiInstruction.Text, _closing.Token)
+                : await _writer.WriteAsync(_source?.Note, before, AiInstruction.Text, _closing.Token);
+            if (_closed) return;
+            if (_revision != revision)
             {
                 // 기다리는 동안 사용자가 고친 글을 지우지 않는다.
-                AiStatus.Text = "쓰는 동안 편집기 내용이 바뀌어 AI 초안을 넣지 않았습니다. 다시 눌러 주세요.";
+                AiStatus.Text = "초안이나 작성 대상이 바뀌어 이전 요청의 제안을 적용하지 않았습니다.";
                 return;
             }
-            Editor.Text = text;
-            AiStatus.Text = "AI가 쓴 초안입니다. 사실과 맞는지 확인하고 고쳐 쓰세요. { } 표시는 AI가 몰라서 비워 둔 자리입니다.";
+            AiProposal.Text = text;
+            _proposalRevision = revision;
+            AiReview.Visibility = Visibility.Visible;
+            AcceptAiButton.IsEnabled = true;
+            AiStatus.Text = "현재 글과 제안을 비교해 필요한 경우 수락하세요. 사실·날짜·약속과 { } 표시를 확인하세요.";
         }
         catch (OperationCanceledException)
         {
@@ -270,16 +340,68 @@ public partial class ComposeWindow : Window
         }
         finally
         {
-            AiButton.IsEnabled = true;
+            AiButton.IsEnabled = !_closed;
         }
     }
 
+    private void InvalidateProposal()
+    {
+        _revision++;
+        if (AcceptAiButton is not null) AcceptAiButton.IsEnabled = false;
+    }
+
+    private void Remember()
+    {
+        _history.Push((Editor.Text, _quote, IncludeQuote.IsChecked == true));
+        UndoButton.IsEnabled = true;
+    }
+
+    private void OnAcceptAi(object sender, RoutedEventArgs e)
+    {
+        if (_closed || _proposalRevision != _revision) return;
+        Remember();
+        Editor.Text = AiProposal.Text;
+        AiReview.Visibility = Visibility.Collapsed;
+    }
+
+    private void OnUndo(object sender, RoutedEventArgs e)
+    {
+        if (_history.TryPop(out var previous))
+        {
+            InvalidateProposal();
+            _quote = previous.Quote;
+            IncludeQuote.IsChecked = previous.IncludeQuote;
+            IncludeQuote.Visibility = _quote.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            IncludeQuote.Content = $"온톡이 넣은 원문 인용 포함 ({NoteBytes.Count(_quote)} Bytes)";
+            Editor.Text = previous.Message;
+            UpdateBytes();
+        }
+        UndoButton.IsEnabled = _history.Count > 0;
+    }
+
     private void ReloadTemplates() => TemplateBox.ItemsSource = _store.GetTemplates();
+
+    private void OnPreparedPersonChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (PreparedPerson.SelectedItem is ContactPerson person) RecipientName.Text = person.Name;
+    }
+
+    private void OnLoadDraft(object sender, RoutedEventArgs e)
+    {
+        if (RecentDrafts.SelectedItem is not DraftChoice item) return;
+        if (Editor.Text.Length > 0 && Dialogs.Show(this, "현재 초안을 보관한 뒤 선택한 초안의 본문으로 바꿀까요?",
+                "초안 불러오기", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+        SaveDraft();
+        Remember();
+        if (Editor.Text.Length > 0) _store.SaveDraft($"draft:{Guid.NewGuid():N}", Editor.Text, DateTimeOffset.Now);
+        Editor.Text = item.Draft.Body;
+    }
 
     private void OnInsertTemplate(object sender, RoutedEventArgs e)
     {
         if (TemplateBox.SelectedItem is Template template)
         {
+            Remember();
             var at = Editor.SelectionStart;
             Editor.Text = Editor.Text.Insert(at, template.Body);
             Editor.SelectionStart = at + template.Body.Length;
