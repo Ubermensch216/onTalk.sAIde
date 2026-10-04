@@ -171,7 +171,7 @@ public partial class ComposeWindow
         }
         var members = _picked.Distinct().ToList();
         if (_store.GetGroups().Any(g => g.Name == name) &&
-            MessageBox.Show(this, $"그룹 '{name}'의 구성원을 지금 넣은 {members.Count}명으로 바꿀까요?", "그룹 덮어쓰기",
+            Dialogs.Show(this, $"그룹 '{name}'의 구성원을 지금 넣은 {members.Count}명으로 바꿀까요?", "그룹 덮어쓰기",
                 MessageBoxButton.OKCancel) != MessageBoxResult.OK)
         {
             return;
@@ -184,7 +184,7 @@ public partial class ComposeWindow
     private void OnDeleteGroup(object sender, RoutedEventArgs e)
     {
         if (GroupBox.SelectedItem is GroupItem { Group: var group } &&
-            MessageBox.Show(this, $"그룹 '{group.Name}'을(를) 삭제할까요?", "그룹 삭제", MessageBoxButton.OKCancel) ==
+            Dialogs.Show(this, $"그룹 '{group.Name}'을(를) 삭제할까요?", "그룹 삭제", MessageBoxButton.OKCancel) ==
             MessageBoxResult.OK)
         {
             _store.DeleteGroup(group.Id);
@@ -259,7 +259,7 @@ public partial class ComposeWindow
             Result($"보내지 않았습니다. {problem}", ok: false);
             return;
         }
-        if (MessageBox.Show(this, Confirmation(state, final), "전송 확인", MessageBoxButton.YesNo, MessageBoxImage.Warning,
+        if (Dialogs.Show(this, Confirmation(state, final), "전송 확인", MessageBoxButton.YesNo, MessageBoxImage.Warning,
                 MessageBoxResult.No) != MessageBoxResult.Yes)
         {
             Result("보내지 않았습니다.", ok: false);

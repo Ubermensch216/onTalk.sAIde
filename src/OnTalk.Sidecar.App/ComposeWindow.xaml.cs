@@ -142,7 +142,7 @@ public partial class ComposeWindow : Window
         ByteText.Text = total == mine
             ? $"{total}/{NoteBytes.Limit} Bytes"
             : $"{total}/{NoteBytes.Limit} Bytes (내 글 {mine} + 인용 {total - mine})";
-        ByteText.Foreground = total > NoteBytes.Limit ? Brushes.Firebrick : Brushes.Black;
+        ByteText.Foreground = total > NoteBytes.Limit ? UiBrushes.Danger : UiBrushes.TextStrong;
     }
 
     private async void OnApply(object sender, RoutedEventArgs e)
@@ -181,7 +181,7 @@ public partial class ComposeWindow : Window
 
         if (result.Status == ApplyStatus.Conflict && result.After is { } current && askOnConflict)
         {
-            var choice = MessageBox.Show(this,
+            var choice = Dialogs.Show(this,
                 "온톡 창의 본문이 이 초안과 맞춘 적 없는 내용입니다. 온톡에서 직접 쓰거나 고친 글로 보입니다.\n\n" +
                 "예: 온톡 창의 글을 편집기로 가져옵니다 (지금 편집기의 글은 사라집니다).\n" +
                 "아니오: 편집기의 글로 온톡 창을 덮어씁니다.\n취소: 아무것도 하지 않습니다.",
@@ -236,7 +236,7 @@ public partial class ComposeWindow : Window
     private void Result(string text, bool ok)
     {
         ResultText.Text = text;
-        ResultText.Foreground = ok ? (Brush)Application.Current.Resources["Accent"] : Brushes.Firebrick;
+        ResultText.Foreground = ok ? UiBrushes.AccentText : UiBrushes.Danger;
     }
 
     private async void OnAiWrite(object sender, RoutedEventArgs e)
@@ -304,7 +304,7 @@ public partial class ComposeWindow : Window
     private void OnDeleteTemplate(object sender, RoutedEventArgs e)
     {
         if (TemplateBox.SelectedItem is Template template &&
-            MessageBox.Show(this, $"문구 '{template.Name}'을(를) 삭제할까요?", "문구 삭제", MessageBoxButton.OKCancel) ==
+            Dialogs.Show(this, $"문구 '{template.Name}'을(를) 삭제할까요?", "문구 삭제", MessageBoxButton.OKCancel) ==
             MessageBoxResult.OK)
         {
             _store.DeleteTemplate(template.Id);

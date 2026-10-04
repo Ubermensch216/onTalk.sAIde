@@ -30,7 +30,7 @@ public partial class TasksWindow : Window
         _loading = true;
         TaskList.ItemsSource = shown;
         _loading = false;
-        EmptyText.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        EmptyBox.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         CountText.Text = $"열린 업무 {all.Count(t => !t.Done)}건 · 완료 {all.Count(t => t.Done)}건";
     }
 
@@ -58,7 +58,7 @@ public partial class TasksWindow : Window
     private void OnDelete(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: long id } &&
-            MessageBox.Show(this, "이 업무를 삭제할까요? 쪽지 원문은 그대로 남습니다.", "업무 삭제",
+            Dialogs.Show(this, "이 업무를 삭제할까요? 쪽지 원문은 그대로 남습니다.", "업무 삭제",
                 MessageBoxButton.OKCancel) == MessageBoxResult.OK)
         {
             _store.DeleteTask(id);

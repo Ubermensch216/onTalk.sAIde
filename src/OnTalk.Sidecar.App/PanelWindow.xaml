@@ -3,276 +3,356 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="onTalk.sAIde" Width="360" Height="640" MinWidth="44" MinHeight="180"
         WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False" ShowActivated="False"
-        WindowStartupLocation="Manual" FontFamily="Malgun Gothic" FontSize="13"
-        Background="White" UseLayoutRounding="True">
+        WindowStartupLocation="Manual" Style="{StaticResource AppWindow}">
     <Window.Resources>
-        <!-- 머리줄과 접힌 도구의 그림 단추. 글꼴은 Windows 10/11에 들어 있는 아이콘 글꼴이다. -->
-        <Style x:Key="IconButton" TargetType="Button">
-            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+        <!-- 정리 중일 때 도는 동기화 표시 -->
+        <Style x:Key="Spinner" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+            <Setter Property="Text" Value="&#xE895;" />
             <Setter Property="FontSize" Value="14" />
-            <Setter Property="Width" Value="30" />
-            <Setter Property="Height" Value="30" />
-            <Setter Property="Foreground" Value="#374151" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Shell" Background="{TemplateBinding Background}" CornerRadius="6">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Shell" Property="Background" Value="#E8EDF5" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="Shell" Property="Opacity" Value="0.35" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
+            <Setter Property="Foreground" Value="{StaticResource AccentText}" />
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+            <Style.Triggers>
+                <Trigger Property="IsVisible" Value="True">
+                    <Trigger.EnterActions>
+                        <BeginStoryboard x:Name="SpinBegin">
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                                 From="0" To="360" Duration="0:0:1.2" RepeatBehavior="Forever" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </Trigger.EnterActions>
+                    <Trigger.ExitActions>
+                        <StopStoryboard BeginStoryboardName="SpinBegin" />
+                    </Trigger.ExitActions>
+                </Trigger>
+            </Style.Triggers>
         </Style>
-        <Style x:Key="RailButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
-            <Setter Property="Width" Value="34" />
-            <Setter Property="Height" Value="32" />
-            <Setter Property="Margin" Value="0,0,0,6" />
-        </Style>
-        <Style x:Key="RailPrimary" TargetType="Button">
-            <Setter Property="Width" Value="34" />
-            <Setter Property="Height" Value="34" />
-            <Setter Property="Margin" Value="0,0,0,12" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Shell" Background="{StaticResource Accent}" CornerRadius="7">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Shell" Property="Opacity" Value="0.85" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style x:Key="SectionTitle" TargetType="TextBlock">
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Margin" Value="0,14,0,6" />
-        </Style>
-        <Style x:Key="Small" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource Muted}" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="TextWrapping" Value="Wrap" />
+
+        <Style x:Key="SectionIcon" TargetType="Run">
+            <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+            <Setter Property="Foreground" Value="{StaticResource AccentText}" />
         </Style>
     </Window.Resources>
-    <Border BorderBrush="#CBD5E1" BorderThickness="1">
+
+    <Border BorderBrush="#BFC8DC" BorderThickness="1" Background="{StaticResource PageBg}">
     <Grid>
-    <!-- 접힌 모양: 온톡 창 옆의 좁은 도구 -->
-    <StackPanel x:Name="Rail" Visibility="Collapsed" Margin="0,8,0,0" HorizontalAlignment="Center">
-        <Button Content="AI" Style="{StaticResource RailPrimary}" Click="OnExpand"
-                ToolTip="패널 펼치기 · Ctrl+Shift+Space" />
-        <Button x:Name="RailSearchButton" Content="&#xE721;" Style="{StaticResource RailButton}"
-                Click="OnOpenSearch" IsEnabled="False" ToolTip="검색" />
-        <Button x:Name="RailTasksButton" Content="&#xE73E;" Style="{StaticResource RailButton}"
-                Click="OnOpenTasks" IsEnabled="False" ToolTip="할 일 목록" />
-        <Button x:Name="RailManageButton" Content="&#xE713;" Style="{StaticResource RailButton}"
-                Click="OnOpenManage" IsEnabled="False" ToolTip="관리" />
-    </StackPanel>
+    <!-- 접힌 모양: 온톡의 남색 사이드바와 같은 좁은 도구 -->
+    <Border x:Name="Rail" Visibility="Collapsed" Background="{StaticResource Navy}">
+        <Border.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="onTalk.sAIde 끝내기" Click="OnExit" />
+            </ContextMenu>
+        </Border.ContextMenu>
+        <StackPanel Margin="0,10,0,0" HorizontalAlignment="Center">
+            <Button Width="34" Height="34" Margin="0,0,0,14" Click="OnExpand" ToolTip="패널 펼치기 · Ctrl+Shift+Space"
+                    Style="{StaticResource OnNavyIconButton}" Background="White">
+                <TextBlock Text="AI" FontFamily="Malgun Gothic" FontWeight="ExtraBold" FontSize="13"
+                           Foreground="{StaticResource Navy}" />
+            </Button>
+            <Button x:Name="RailSearchButton" Content="&#xE721;" Style="{StaticResource RailButton}"
+                    Click="OnOpenSearch" IsEnabled="False" ToolTip="검색" />
+            <Button x:Name="RailTasksButton" Content="&#xE73E;" Style="{StaticResource RailButton}"
+                    Click="OnOpenTasks" IsEnabled="False" ToolTip="할 일 목록" />
+            <Button x:Name="RailManageButton" Content="&#xE713;" Style="{StaticResource RailButton}"
+                    Click="OnOpenManage" IsEnabled="False" ToolTip="관리" />
+        </StackPanel>
+    </Border>
 
     <!-- 펼친 모양 -->
     <DockPanel x:Name="Expanded">
-        <Border DockPanel.Dock="Top" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1"
-                Padding="12,7,6,7" MouseLeftButtonDown="OnHeaderMouseDown">
+        <!-- 머리줄: 온톡 사이드바와 같은 남색 -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource Navy}" Padding="14,10,8,10"
+                MouseLeftButtonDown="OnHeaderMouseDown">
             <Border.ContextMenu>
                 <ContextMenu>
                     <MenuItem Header="onTalk.sAIde 끝내기" Click="OnExit" />
                 </ContextMenu>
             </Border.ContextMenu>
             <DockPanel>
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button x:Name="ComposeButton" Content="&#xE70F;" Style="{StaticResource IconButton}"
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="ComposeButton" Content="&#xE70F;" Style="{StaticResource OnNavyIconButton}"
                             Click="OnNewDraft" IsEnabled="False" ToolTip="새 초안" />
-                    <Button x:Name="SearchButton" Content="&#xE721;" Style="{StaticResource IconButton}"
+                    <Button x:Name="SearchButton" Content="&#xE721;" Style="{StaticResource OnNavyIconButton}"
                             Click="OnOpenSearch" IsEnabled="False" ToolTip="검색" />
-                    <Button x:Name="TasksButton" Content="&#xE73E;" Style="{StaticResource IconButton}"
+                    <Button x:Name="TasksButton" Content="&#xE73E;" Style="{StaticResource OnNavyIconButton}"
                             Click="OnOpenTasks" IsEnabled="False" ToolTip="할 일 목록" />
-                    <Button x:Name="ManageButton" Content="&#xE713;" Style="{StaticResource IconButton}"
+                    <Button x:Name="ManageButton" Content="&#xE713;" Style="{StaticResource OnNavyIconButton}"
                             Click="OnOpenManage" IsEnabled="False" ToolTip="관리" />
-                    <Button Content="&#xE76B;" Style="{StaticResource IconButton}" Click="OnCollapse"
+                    <Rectangle Width="1" Height="16" Fill="{StaticResource OnNavyPressed}" Margin="4,0" />
+                    <Button Content="&#xE76B;" Style="{StaticResource OnNavyIconButton}" Click="OnCollapse"
                             ToolTip="접기 · Esc" />
+                    <Button Content="&#xE7E8;" Style="{StaticResource OnNavyIconButton}" Click="OnExit"
+                            ToolTip="onTalk.sAIde 끝내기 (온톡은 그대로 둡니다)" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Background="#EEF3FF" CornerRadius="6" Padding="7,4" Margin="0,0,8,0">
-                        <TextBlock Text="AI" Foreground="{StaticResource Accent}" FontWeight="Bold" FontSize="12" />
+                    <Border Background="White" CornerRadius="9" Width="30" Height="30" Margin="0,0,10,0">
+                        <TextBlock Text="AI" Foreground="{StaticResource Navy}" FontWeight="ExtraBold" FontSize="13"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
-                    <TextBlock Text="sAIde" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="sAIde" Foreground="White" FontWeight="Bold" FontSize="15" />
+                        <TextBlock Text="온톡 옆의 쪽지 비서" Foreground="{StaticResource OnNavyMuted}" FontSize="11" />
+                    </StackPanel>
                 </StackPanel>
             </DockPanel>
         </Border>
 
-        <Border DockPanel.Dock="Top" Background="#F3F4F6" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1"
-                Padding="12,7">
+        <!-- 연결 상태 -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}"
+                BorderThickness="0,0,0,1" Padding="12,8">
+            <Border x:Name="StatusChip" Background="{StaticResource PageBg}" CornerRadius="12" Padding="10,4"
+                    HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#9CA3AF" VerticalAlignment="Center"
+                             Margin="0,0,8,0" />
+                    <TextBlock x:Name="StatusText" Text="온톡을 찾는 중" VerticalAlignment="Center" FontSize="12"
+                               TextTrimming="CharacterEllipsis" MaxWidth="290" />
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <!-- 계정 연결 확인 -->
+        <Border x:Name="AccountBanner" DockPanel.Dock="Top" Background="{StaticResource WarnSoft}"
+                BorderBrush="{StaticResource WarnLine}" BorderThickness="0,0,0,1" Padding="14,12"
+                Visibility="Collapsed">
             <DockPanel>
-                <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#9CA3AF" VerticalAlignment="Center"
-                         Margin="0,0,8,0" />
-                <TextBlock x:Name="StatusText" Text="온톡을 찾는 중" VerticalAlignment="Center" FontSize="12"
-                           TextTrimming="CharacterEllipsis" />
+                <TextBlock DockPanel.Dock="Left" Text="&#xE7BA;" FontFamily="{StaticResource IconFont}" FontSize="16"
+                           Foreground="{StaticResource Warn}" Margin="0,1,10,0" VerticalAlignment="Top" />
+                <StackPanel>
+                    <TextBlock x:Name="AccountText" TextWrapping="Wrap" FontWeight="SemiBold" />
+                    <TextBlock Style="{StaticResource Small}" Margin="0,4,0,10"
+                               Text="연결하면 이 PC에서 연 쪽지를 계정별 암호화 저장소에 보관합니다. 연결 전에는 아무것도 읽어 저장하지 않습니다." />
+                    <Button x:Name="ConfirmButton" Content="이 계정으로 연결" HorizontalAlignment="Left"
+                            Style="{StaticResource PrimaryButton}" Click="OnConfirmAccount" />
+                </StackPanel>
             </DockPanel>
         </Border>
 
-        <Border x:Name="AccountBanner" DockPanel.Dock="Top" Background="#FFF7E6" BorderBrush="#F5D58A"
-                BorderThickness="0,0,0,1" Padding="12,10" Visibility="Collapsed">
-            <StackPanel>
-                <TextBlock x:Name="AccountText" TextWrapping="Wrap" />
-                <TextBlock Style="{StaticResource Small}" Margin="0,4,0,8"
-                           Text="연결하면 이 PC에서 연 쪽지를 계정별 암호화 저장소에 보관합니다. 연결 전에는 아무것도 읽어 저장하지 않습니다." />
-                <Button x:Name="ConfirmButton" Content="이 계정으로 연결" HorizontalAlignment="Left" Padding="12,4"
-                        Click="OnConfirmAccount" />
-            </StackPanel>
-        </Border>
-
-        <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="12,6">
+        <!-- 발아래 -->
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}"
+                BorderThickness="0,1,0,0" Padding="14,7">
             <DockPanel>
-                <TextBlock DockPanel.Dock="Right" Style="{StaticResource Small}" FontSize="11"
-                           VerticalAlignment="Center" Text="Ctrl+Shift+Space로 열기" />
-                <TextBlock x:Name="FooterText" Style="{StaticResource Small}" VerticalAlignment="Center" />
+                <TextBlock DockPanel.Dock="Right" Style="{StaticResource Caption}" TextWrapping="NoWrap"
+                           Foreground="{StaticResource Subtle}" VerticalAlignment="Center" Text="Ctrl+Shift+Space" />
+                <TextBlock x:Name="FooterText" Style="{StaticResource Caption}" TextWrapping="NoWrap"
+                           VerticalAlignment="Center" />
             </DockPanel>
         </Border>
 
         <Grid>
-            <TextBlock x:Name="EmptyText" Margin="24" TextWrapping="Wrap" TextAlignment="Center"
-                       VerticalAlignment="Center" Foreground="{StaticResource Muted}"
-                       Text="온톡에서 받은 쪽지를 열면 여기에 표시됩니다." />
+            <!-- 아직 쪽지가 없을 때 -->
+            <StackPanel x:Name="EmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="28,0,28,40">
+                <Border Width="64" Height="64" CornerRadius="32" Background="{StaticResource AccentSoft}"
+                        HorizontalAlignment="Center">
+                    <TextBlock Text="&#xE715;" FontFamily="{StaticResource IconFont}" FontSize="26"
+                               Foreground="{StaticResource Accent}" HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                </Border>
+                <TextBlock x:Name="EmptyText" Margin="0,16,0,0" TextWrapping="Wrap" TextAlignment="Center"
+                           Foreground="{StaticResource Muted}" LineHeight="20"
+                           Text="온톡에서 받은 쪽지를 열면 여기에 표시됩니다." />
+            </StackPanel>
 
             <DockPanel x:Name="NoteView" Visibility="Collapsed">
-                <StackPanel DockPanel.Dock="Top" Margin="12,12,12,8">
-                    <TextBlock x:Name="SenderText" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
-                    <TextBlock x:Name="SenderDetailText" Foreground="{StaticResource Muted}" TextWrapping="Wrap" />
-                    <TextBlock x:Name="TimeText" Foreground="{StaticResource Muted}" Margin="0,2,0,0" />
-                    <TextBlock x:Name="CaptureText" Style="{StaticResource Small}" Margin="0,4,0,0" />
-                    <Button Content="답장 초안 쓰기" HorizontalAlignment="Left" Padding="10,2" Margin="0,8,0,0"
-                            Click="OnReplyDraft" />
-                </StackPanel>
+                <!-- 쪽지 머리: 보낸 사람과 시각 -->
+                <Border DockPanel.Dock="Top" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}"
+                        BorderThickness="0,0,0,1" Padding="14,14,14,14" Margin="0,0,0,12">
+                    <StackPanel>
+                        <DockPanel>
+                            <Border DockPanel.Dock="Left" Width="40" Height="40" CornerRadius="20"
+                                    Background="{StaticResource AccentSoft}" Margin="0,0,12,0" VerticalAlignment="Top">
+                                <TextBlock x:Name="SenderInitial" FontWeight="Bold" FontSize="16"
+                                           Foreground="{StaticResource AccentText}" HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="SenderText" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
+                                <TextBlock x:Name="SenderDetailText" Style="{StaticResource Small}" Margin="0,1,0,0" />
+                                <TextBlock x:Name="TimeText" Style="{StaticResource Small}" Margin="0,1,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+                        <Border Style="{StaticResource Chip}" Margin="0,10,0,0">
+                            <TextBlock x:Name="CaptureText" Style="{StaticResource Caption}" TextWrapping="NoWrap"
+                                       Foreground="{StaticResource AccentText}" />
+                        </Border>
+                        <Button Content="답장 초안 쓰기" Style="{StaticResource PrimaryButton}" Margin="0,12,0,0"
+                                MinHeight="36" Click="OnReplyDraft" />
+                    </StackPanel>
+                </Border>
 
-                <TabControl BorderThickness="0,1,0,0" BorderBrush="{StaticResource Line}" Padding="0">
-                    <TabItem Header="정리" Padding="14,4">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel Margin="12,4,12,12">
-                                <StackPanel x:Name="AnalysisStatusPanel" Margin="0,10,0,0">
-                                    <TextBlock x:Name="AnalysisStatusText" TextWrapping="Wrap"
-                                               Foreground="{StaticResource Accent}" />
-                                    <Button x:Name="RetryButton" Content="다시 분석" HorizontalAlignment="Left"
-                                            Padding="10,2" Margin="0,6,0,0" Click="OnRetryAnalysis"
-                                            Visibility="Collapsed" />
-                                </StackPanel>
+                <TabControl Style="{StaticResource PillTabs}">
+                    <TabItem Header="정리">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Foreground="{StaticResource TextStrong}" FontWeight="Normal">
+                            <StackPanel Margin="12,0,12,12">
+                                <Border x:Name="AnalysisStatusPanel" Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Left" Style="{StaticResource Spinner}"
+                                                       Margin="0,2,10,0" VerticalAlignment="Top">
+                                                <TextBlock.RenderTransform>
+                                                    <RotateTransform />
+                                                </TextBlock.RenderTransform>
+                                            </TextBlock>
+                                            <TextBlock x:Name="AnalysisStatusText" TextWrapping="Wrap" LineHeight="19"
+                                                       Foreground="{StaticResource TextStrong}" />
+                                        </DockPanel>
+                                        <Button x:Name="RetryButton" Content="다시 분석" HorizontalAlignment="Left"
+                                                Margin="0,10,0,0" Click="OnRetryAnalysis" Visibility="Collapsed" />
+                                    </StackPanel>
+                                </Border>
 
-                                <StackPanel x:Name="SummarySection" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource SectionTitle}" Text="요약" />
-                                    <TextBlock x:Name="SummaryText" TextWrapping="Wrap" />
-                                    <TextBlock Style="{StaticResource Small}" Margin="0,4,0,0"
-                                               Text="AI가 쓴 요약입니다. 원문과 다를 수 있으니 중요한 내용은 원문에서 확인하세요." />
-                                </StackPanel>
+                                <Border x:Name="SummarySection" Style="{StaticResource Card}" Visibility="Collapsed">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource SectionTitle}">
+                                            <Run Style="{StaticResource SectionIcon}" Text="&#xE8BD;" /><Run Text="  요약" />
+                                        </TextBlock>
+                                        <TextBlock x:Name="SummaryText" Style="{StaticResource Body}" />
+                                        <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
+                                                   Text="AI가 쓴 요약입니다. 원문과 다를 수 있으니 중요한 내용은 원문에서 확인하세요." />
+                                    </StackPanel>
+                                </Border>
 
-                                <StackPanel x:Name="CandidateSection" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource SectionTitle}" Text="할 일 후보" />
-                                    <TextBlock x:Name="NoCandidateText" Style="{StaticResource Small}"
-                                               Text="이 쪽지에서 해야 할 일을 찾지 못했습니다." />
-                                    <ItemsControl x:Name="CandidateList">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <StackPanel Margin="0,0,0,10">
-                                                    <CheckBox IsChecked="{Binding IsChecked}" IsEnabled="{Binding CanRegister}">
-                                                        <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
-                                                    </CheckBox>
-                                                    <TextBlock Text="{Binding DueLine}" Style="{StaticResource Small}"
-                                                               Margin="20,2,0,0" />
-                                                    <TextBlock Text="{Binding EvidenceLine}" Style="{StaticResource Small}"
-                                                               Margin="20,2,0,0" FontStyle="Italic" />
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                    <TextBlock x:Name="DroppedText" Style="{StaticResource Small}" Margin="0,0,0,6"
-                                               Visibility="Collapsed" />
-                                    <Button x:Name="RegisterButton" Content="선택한 항목을 업무로 등록"
-                                            HorizontalAlignment="Left" Padding="10,3" Click="OnRegisterCandidates" />
-                                </StackPanel>
+                                <Border x:Name="CandidateSection" Style="{StaticResource Card}" Visibility="Collapsed">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource SectionTitle}">
+                                            <Run Style="{StaticResource SectionIcon}" Text="&#xE73E;" /><Run Text="  할 일 후보" />
+                                        </TextBlock>
+                                        <TextBlock x:Name="NoCandidateText" Style="{StaticResource Small}"
+                                                   Text="이 쪽지에서 해야 할 일을 찾지 못했습니다." />
+                                        <ItemsControl x:Name="CandidateList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Margin="0,0,0,12">
+                                                        <CheckBox IsChecked="{Binding IsChecked}" IsEnabled="{Binding CanRegister}">
+                                                            <TextBlock Text="{Binding Title}" TextWrapping="Wrap" LineHeight="19" />
+                                                        </CheckBox>
+                                                        <TextBlock Text="{Binding DueLine}" Style="{StaticResource Small}"
+                                                                   Margin="27,3,0,0" />
+                                                        <Border BorderBrush="{StaticResource LineStrong}" BorderThickness="2,0,0,0"
+                                                                Padding="8,0,0,0" Margin="27,5,0,0">
+                                                            <TextBlock Text="{Binding EvidenceLine}" Style="{StaticResource Caption}"
+                                                                       FontStyle="Italic" />
+                                                        </Border>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <TextBlock x:Name="DroppedText" Style="{StaticResource Caption}" Margin="0,0,0,10"
+                                                   Visibility="Collapsed" />
+                                        <Button x:Name="RegisterButton" Content="선택한 항목을 업무로 등록"
+                                                HorizontalAlignment="Left" Style="{StaticResource PrimaryButton}"
+                                                Click="OnRegisterCandidates" />
+                                    </StackPanel>
+                                </Border>
 
-                                <StackPanel x:Name="UncertainSection" Visibility="Collapsed">
-                                    <TextBlock Style="{StaticResource SectionTitle}" Text="확인이 필요한 점" />
-                                    <ItemsControl x:Name="UncertainList">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,4" />
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
+                                <Border x:Name="UncertainSection" Style="{StaticResource Card}" Visibility="Collapsed"
+                                        Background="{StaticResource WarnSoft}" BorderBrush="{StaticResource WarnLine}">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource SectionTitle}">
+                                            <Run FontFamily="{StaticResource IconFont}" Foreground="{StaticResource Warn}" Text="&#xE7BA;" /><Run Text="  확인이 필요한 점" />
+                                        </TextBlock>
+                                        <ItemsControl x:Name="UncertainList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <DockPanel Margin="0,0,0,5">
+                                                        <TextBlock DockPanel.Dock="Left" Text="•" Margin="2,0,8,0"
+                                                                   Foreground="{StaticResource Warn}" />
+                                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" LineHeight="19" />
+                                                    </DockPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
 
-                                <TextBlock Style="{StaticResource SectionTitle}" Text="이 쪽지의 업무" />
-                                <TextBlock x:Name="NoTaskText" Style="{StaticResource Small}"
-                                           Text="등록한 업무가 없습니다." />
-                                <ItemsControl x:Name="NoteTaskList">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <StackPanel Margin="0,0,0,8">
-                                                <CheckBox IsChecked="{Binding Done, Mode=OneWay}" Tag="{Binding Id}"
-                                                          Click="OnToggleTask">
-                                                    <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
-                                                </CheckBox>
-                                                <TextBlock Text="{Binding DueLine}" Style="{StaticResource Small}"
-                                                           Margin="20,2,0,0" />
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource SectionTitle}">
+                                            <Run Style="{StaticResource SectionIcon}" Text="&#xE8FB;" /><Run Text="  이 쪽지의 업무" />
+                                        </TextBlock>
+                                        <TextBlock x:Name="NoTaskText" Style="{StaticResource Small}"
+                                                   Text="등록한 업무가 없습니다." />
+                                        <ItemsControl x:Name="NoteTaskList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Margin="0,0,0,10">
+                                                        <CheckBox IsChecked="{Binding Done, Mode=OneWay}" Tag="{Binding Id}"
+                                                                  Click="OnToggleTask">
+                                                            <TextBlock Text="{Binding Title}" Style="{StaticResource TaskTitle}" />
+                                                        </CheckBox>
+                                                        <TextBlock Text="{Binding DueLine}" Style="{StaticResource Small}"
+                                                                   Margin="27,2,0,0" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
 
-                                <TextBlock Style="{StaticResource SectionTitle}" Text="업무 직접 추가" />
-                                <TextBox x:Name="ManualTitle" Padding="4,3" />
-                                <DockPanel Margin="0,6,0,0">
-                                    <Button DockPanel.Dock="Right" Content="추가" Padding="12,2" Margin="8,0,0,0"
-                                            Click="OnAddManualTask" />
-                                    <DatePicker x:Name="ManualDue" />
-                                </DockPanel>
-                                <TextBlock Style="{StaticResource Small}" Margin="0,4,0,0"
-                                           Text="기한을 정한 업무만 전날 9시와 당일 9시에 알립니다." />
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource SectionTitle}">
+                                            <Run Style="{StaticResource SectionIcon}" Text="&#xE710;" /><Run Text="  업무 직접 추가" />
+                                        </TextBlock>
+                                        <TextBox x:Name="ManualTitle" Tag="할 일을 적어 주세요" />
+                                        <DockPanel Margin="0,8,0,0">
+                                            <Button DockPanel.Dock="Right" Content="추가" Style="{StaticResource PrimaryButton}"
+                                                    Margin="8,0,0,0" Padding="18,0" Click="OnAddManualTask" />
+                                            <DatePicker x:Name="ManualDue" />
+                                        </DockPanel>
+                                        <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
+                                                   Text="기한을 정한 업무만 전날 9시와 당일 9시에 알립니다." />
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>
-                    <TabItem Header="원문" Padding="14,4">
-                        <DockPanel>
-                            <StackPanel x:Name="AttachmentPanel" DockPanel.Dock="Bottom" Margin="12,8,12,12">
-                                <TextBlock x:Name="AttachmentTitle" FontWeight="SemiBold" Margin="0,0,0,4" />
-                                <ItemsControl x:Name="AttachmentList">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <DockPanel Margin="0,3">
-                                                <Button DockPanel.Dock="Right" Content="내보내기" Padding="6,1" Margin="4,0,0,0"
-                                                        VerticalAlignment="Top" Tag="{Binding Id}" IsEnabled="{Binding Stored}"
-                                                        Click="OnExportAttachment" />
-                                                <Button DockPanel.Dock="Right" Content="가져오기" Padding="6,1" Margin="6,0,0,0"
-                                                        VerticalAlignment="Top" Tag="{Binding Id}" Click="OnImportAttachment" />
-                                                <StackPanel>
-                                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Text="{Binding StatusLine}" Style="{StaticResource Small}" />
-                                                </StackPanel>
-                                            </DockPanel>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                                <TextBlock Style="{StaticResource Small}" Margin="0,4,0,0"
-                                           Text="온톡에서 '저장'으로 받은 파일을 '가져오기'로 고르면 암호화해 보관합니다. 온톡의 첨부파일은 7일 뒤 지워집니다." />
+
+                    <TabItem Header="원문">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Foreground="{StaticResource TextStrong}" FontWeight="Normal">
+                            <StackPanel Margin="12,0,12,12">
+                                <Border Style="{StaticResource Card}" Padding="0">
+                                    <TextBox x:Name="BodyText" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0"
+                                             Background="Transparent" Padding="14,12" MinHeight="120"
+                                             VerticalScrollBarVisibility="Disabled" VerticalContentAlignment="Top" />
+                                </Border>
+                                <Border x:Name="AttachmentPanel" Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <TextBlock x:Name="AttachmentTitle" Style="{StaticResource SectionTitle}" />
+                                        <ItemsControl x:Name="AttachmentList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="{StaticResource SurfaceAlt}" CornerRadius="8"
+                                                            Padding="10,8" Margin="0,0,0,6">
+                                                        <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Left" Text="&#xE7C3;"
+                                                                       FontFamily="{StaticResource IconFont}" FontSize="18"
+                                                                       Foreground="{StaticResource Muted}" Margin="0,2,10,0"
+                                                                       VerticalAlignment="Top" />
+                                                            <StackPanel>
+                                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding StatusLine}" Style="{StaticResource Caption}" />
+                                                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                                                    <Button Content="가져오기" Style="{StaticResource SmallButton}"
+                                                                            Tag="{Binding Id}" Click="OnImportAttachment" />
+                                                                    <Button Content="내보내기" Style="{StaticResource SmallButton}"
+                                                                            Margin="6,0,0,0" Tag="{Binding Id}"
+                                                                            IsEnabled="{Binding Stored}" Click="OnExportAttachment" />
+                                                                </StackPanel>
+                                                            </StackPanel>
+                                                        </DockPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <TextBlock Style="{StaticResource Caption}" Margin="0,4,0,0"
+                                                   Text="온톡에서 '저장'으로 받은 파일을 '가져오기'로 고르면 암호화해 보관합니다. 온톡의 첨부파일은 7일 뒤 지워집니다." />
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
-                            <TextBox x:Name="BodyText" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0,0,0,1"
-                                     BorderBrush="{StaticResource Line}" Padding="12,10"
-                                     VerticalScrollBarVisibility="Auto" Background="#FAFAFA" />
-                        </DockPanel>
+                        </ScrollViewer>
                     </TabItem>
                 </TabControl>
             </DockPanel>

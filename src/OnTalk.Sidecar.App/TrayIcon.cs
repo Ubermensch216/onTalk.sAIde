@@ -47,6 +47,20 @@ public sealed class TrayIcon : IDisposable
     private static extern IntPtr LoadIconW(IntPtr instance, IntPtr name);
 
     private NotifyData _data;
+    private readonly System.Drawing.Icon? _icon = LoadOwnIcon();
+
+    /// <summary>실행 파일에 넣은 앱 아이콘. 읽지 못하면 기본 응용 프로그램 아이콘을 쓴다.</summary>
+    private static System.Drawing.Icon? LoadOwnIcon()
+    {
+        try
+        {
+            return Environment.ProcessPath is { } path ? System.Drawing.Icon.ExtractAssociatedIcon(path) : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or System.IO.IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>아이콘을 올리지 못했으면 패널을 숨기지 않아야 한다.</summary>
     public bool IsAvailable { get; private set; }
@@ -60,7 +74,7 @@ public sealed class TrayIcon : IDisposable
             Id = 1,
             Flags = NifMessage | NifIcon | NifTip,
             Callback = CallbackMessage,
-            Icon = LoadIconW(IntPtr.Zero, IdiApplication),
+            Icon = _icon?.Handle ?? LoadIconW(IntPtr.Zero, IdiApplication),
             Tip = "onTalk.sAIde · 온톡 옆의 비서",
             Info = "",
             InfoTitle = "",
@@ -75,5 +89,6 @@ public sealed class TrayIcon : IDisposable
             Shell_NotifyIconW(NimDelete, ref _data);
             IsAvailable = false;
         }
+        _icon?.Dispose();
     }
 }

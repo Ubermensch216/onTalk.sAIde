@@ -5,6 +5,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>OnTalk.sAIde</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/app.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\OnTalk.Sidecar.Automation\OnTalk.Sidecar.Automation.csproj" />

@@ -301,7 +301,7 @@ public partial class PanelWindow : Window
         try
         {
             var result = ProfileBackup.Restore(ProfileStore.DefaultRoot, account, zipPath, password);
-            MessageBox.Show(this,
+            Dialogs.Show(this,
                 $"백업을 되살렸습니다. 쪽지 {result.Notes}건." +
                 (result.PreviousDataMovedTo is { } moved ? $"\n\n되살리기 전의 자료는 지우지 않고 아래 폴더로 옮겼습니다.\n{moved}" : ""),
                 "onTalk.sAIde");
@@ -309,7 +309,7 @@ public partial class PanelWindow : Window
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException
                                        or Microsoft.Data.Sqlite.SqliteException)
         {
-            MessageBox.Show(this, $"되살리지 못했습니다. 기존 자료는 그대로입니다.\n{ex.Message}", "onTalk.sAIde");
+            Dialogs.Show(this, $"되살리지 못했습니다. 기존 자료는 그대로입니다.\n{ex.Message}", "onTalk.sAIde");
         }
     }
 
@@ -326,11 +326,11 @@ public partial class PanelWindow : Window
             // 다시 수집하려면 계정 연결을 새로 확인받는다.
             _settings.ConfirmedAccounts.Remove(account);
             _settings.Save();
-            MessageBox.Show(this, $"계정 '{account}'의 보관 자료를 모두 지웠습니다. 온톡의 쪽지에는 영향이 없습니다.", "onTalk.sAIde");
+            Dialogs.Show(this, $"계정 '{account}'의 보관 자료를 모두 지웠습니다. 온톡의 쪽지에는 영향이 없습니다.", "onTalk.sAIde");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, $"지우지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
+            Dialogs.Show(this, $"지우지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
         }
     }
 
@@ -344,7 +344,7 @@ public partial class PanelWindow : Window
                                        or Microsoft.Data.Sqlite.SqliteException
                                        or System.Security.Cryptography.CryptographicException)
         {
-            MessageBox.Show(this, $"저장소를 열지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
+            Dialogs.Show(this, $"저장소를 열지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
             return;
         }
         SetStoreButtons(true);
@@ -388,6 +388,12 @@ public partial class PanelWindow : Window
     {
         StatusText.Text = text;
         StatusDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
+        StatusChip.Background = (Brush)FindResource(color switch
+        {
+            "#10B981" => "SuccessSoft",
+            "#F59E0B" => "WarnSoft",
+            _ => "PageBg",
+        });
     }
 
     private void UpdateFooter()
@@ -408,13 +414,13 @@ public partial class PanelWindow : Window
         // 보고 있던 쪽지가 사라졌으니 그 쪽지의 분석은 더 필요 없다.
         _analysisCancel?.Cancel();
         EmptyText.Text = message;
-        EmptyText.Visibility = Visibility.Visible;
+        EmptyState.Visibility = Visibility.Visible;
         NoteView.Visibility = Visibility.Collapsed;
     }
 
     private void ShowNote(ReceivedNote note, SaveResult? saved)
     {
-        EmptyText.Visibility = Visibility.Collapsed;
+        EmptyState.Visibility = Visibility.Collapsed;
         NoteView.Visibility = Visibility.Visible;
         CaptureText.Text = saved switch
         {
@@ -429,6 +435,7 @@ public partial class PanelWindow : Window
             _shownNote = note;
             _shownNoteId = null;
             SenderText.Text = note.SenderName;
+            SenderInitial.Text = note.SenderName.Trim() is { Length: > 0 } name ? name[..1] : "?";
             SenderDetailText.Text = note.SenderDetail;
             TimeText.Text = note.SentAt switch
             {
@@ -618,11 +625,11 @@ public partial class PanelWindow : Window
             var file = new FileInfo(dialog.FileName);
             if (file.Length > ProfileStore.MaxFileBytes)
             {
-                MessageBox.Show(this, "200MB를 넘는 파일은 보관하지 않습니다.", "onTalk.sAIde");
+                Dialogs.Show(this, "200MB를 넘는 파일은 보관하지 않습니다.", "onTalk.sAIde");
                 return;
             }
             if (!string.Equals(file.Name, attachment.Name, StringComparison.OrdinalIgnoreCase) &&
-                MessageBox.Show(this, $"고른 파일 이름이 첨부 이름과 다릅니다.\n\n첨부: {attachment.Name}\n고른 파일: {file.Name}\n\n이 파일로 보관할까요?",
+                Dialogs.Show(this, $"고른 파일 이름이 첨부 이름과 다릅니다.\n\n첨부: {attachment.Name}\n고른 파일: {file.Name}\n\n이 파일로 보관할까요?",
                     "이름이 다릅니다", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
             {
                 return;
@@ -630,7 +637,7 @@ public partial class PanelWindow : Window
             var data = File.ReadAllBytes(file.FullName);
             if (attachment.Sha256 is { } old &&
                 old != Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(data)) &&
-                MessageBox.Show(this, "이미 보관한 파일과 내용이 다릅니다. 새 파일로 바꿀까요?", "내용이 다릅니다",
+                Dialogs.Show(this, "이미 보관한 파일과 내용이 다릅니다. 새 파일로 바꿀까요?", "내용이 다릅니다",
                     MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
             {
                 return;
@@ -640,7 +647,7 @@ public partial class PanelWindow : Window
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            MessageBox.Show(this, $"파일을 보관하지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
+            Dialogs.Show(this, $"파일을 보관하지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
         }
     }
 
@@ -663,7 +670,7 @@ public partial class PanelWindow : Window
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             // InvalidDataException(보관 파일 손상)도 IOException이다.
-            MessageBox.Show(this, $"파일을 내보내지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
+            Dialogs.Show(this, $"파일을 내보내지 못했습니다.\n{ex.Message}", "onTalk.sAIde");
         }
     }
 

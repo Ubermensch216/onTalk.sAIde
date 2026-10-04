@@ -57,7 +57,7 @@ public partial class ManageWindow : Window
     private void Status(string text, bool ok)
     {
         BackupStatus.Text = text;
-        BackupStatus.Foreground = ok ? (Brush)Application.Current.Resources["Accent"] : Brushes.Firebrick;
+        BackupStatus.Foreground = ok ? UiBrushes.AccentText : UiBrushes.Danger;
     }
 
     private async void OnListModels(object sender, RoutedEventArgs e)
@@ -71,14 +71,14 @@ public partial class ManageWindow : Window
             AnalysisModelBox.ItemsSource = models;
             EmbeddingModelBox.ItemsSource = models;
             (AnalysisModelBox.Text, EmbeddingModelBox.Text) = (analysis, embedding);
-            ModelStatus.Foreground = (Brush)Application.Current.Resources["Muted"];
+            ModelStatus.Foreground = UiBrushes.Muted;
             ModelStatus.Text = models.Count == 0
                 ? "Ollama에 설치된 모델이 없습니다."
                 : $"설치된 모델 {models.Count}개를 목록에 넣었습니다.";
         }
         catch (AnalysisUnavailableException ex)
         {
-            ModelStatus.Foreground = Brushes.Firebrick;
+            ModelStatus.Foreground = UiBrushes.Danger;
             ModelStatus.Text = ex.Message;
         }
         finally
@@ -92,7 +92,7 @@ public partial class ManageWindow : Window
         var (analysis, embedding) = (AnalysisModelBox.Text.Trim(), EmbeddingModelBox.Text.Trim());
         if (analysis.Length == 0 || embedding.Length == 0)
         {
-            ModelStatus.Foreground = Brushes.Firebrick;
+            ModelStatus.Foreground = UiBrushes.Danger;
             ModelStatus.Text = "두 모델 이름을 모두 적어 주세요.";
             return;
         }
@@ -101,12 +101,12 @@ public partial class ManageWindow : Window
         try
         {
             _settings.Save();
-            ModelStatus.Foreground = (Brush)Application.Current.Resources["Accent"];
+            ModelStatus.Foreground = UiBrushes.AccentText;
             ModelStatus.Text = "저장했습니다. 프로그램을 다시 켜면 이 모델을 씁니다.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            ModelStatus.Foreground = Brushes.Firebrick;
+            ModelStatus.Foreground = UiBrushes.Danger;
             ModelStatus.Text = $"저장하지 못했습니다. {ex.Message}";
         }
     }
@@ -156,7 +156,7 @@ public partial class ManageWindow : Window
         {
             return;
         }
-        if (MessageBox.Show(this,
+        if (Dialogs.Show(this,
                 "지금 보관 자료를 백업의 내용으로 바꿉니다. 지금 자료는 지우지 않고 옆 폴더로 옮겨 둡니다.\n\n되살릴까요?",
                 "백업에서 되살리기", MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) == MessageBoxResult.OK)
         {
@@ -168,7 +168,7 @@ public partial class ManageWindow : Window
     private void OnDeleteAll(object sender, RoutedEventArgs e)
     {
         var count = _store.GetCollectionRange().Count;
-        if (MessageBox.Show(this,
+        if (Dialogs.Show(this,
                 $"계정 '{_store.LoginId}'로 보관한 쪽지 {count}건과 업무·초안·파일을 모두 지웁니다. 되돌릴 수 없습니다.\n\n" +
                 "필요하면 먼저 백업 파일을 만드세요. 정말 지울까요?",
                 "모두 지우기", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes)
