@@ -63,6 +63,43 @@ public class WindowContextTests
     public void 메인_본문_표식이_충돌하면_이전_메뉴를_유지하지_않는다() =>
         Assert.Equal(MainMenu.Unknown, WindowContextParser.Parse(MainTree(Text("나의 그룹"), Text("타 기관 조회"))).Menu);
 
+    [Fact]
+    public void 실제_쪽지_목록의_세_탭으로_메뉴를_확인한다()
+    {
+        var context = WindowContextParser.Parse(MainTree(Text("받은 쪽지"), Text("보낸 쪽지"), Text("보관 쪽지")));
+        Assert.Equal(OnTalkSurface.Main, context.Surface);
+        Assert.Equal(MainMenu.Notes, context.Menu);
+    }
+
+    [Theory]
+    [InlineData("/notes")]
+    [InlineData("/notes/")]
+    [InlineData("/notes?tab=SENT")]
+    public void 쪽지_해시_경로로_본문_로딩_전에도_메뉴를_확인한다(string route)
+    {
+        var context = WindowContextParser.Parse(Document(MainUrl + "#" + route));
+        Assert.Equal(OnTalkSurface.Main, context.Surface); Assert.Equal(MainMenu.Notes, context.Menu);
+    }
+
+    [Fact]
+    public void 선택_신호나_하위_글자가_없는_쪽지_탭_이름도_확인한다() =>
+        Assert.Equal(MainMenu.Notes, WindowContextParser.Parse(MainTree(Navigation("받은 쪽지"), Navigation("보낸 쪽지"), Navigation("보관 쪽지"))).Menu);
+
+    [Fact]
+    public void 숨긴_쪽지_탭을_현재_메뉴로_판정하지_않는다() =>
+        Assert.Equal(MainMenu.Unknown, WindowContextParser.Parse(MainTree(Navigation("받은 쪽지",0x8000), Navigation("보낸 쪽지",0x8000), Navigation("보관 쪽지",0x8000))).Menu);
+
+    [Theory]
+    [InlineData("받은 쪽지")]
+    [InlineData("보낸 쪽지")]
+    [InlineData("보관 쪽지")]
+    public void 쪽지_탭_이름_하나만으로_다른_메뉴를_쪽지로_오인하지_않는다(string label) =>
+        Assert.Equal(MainMenu.Unknown, WindowContextParser.Parse(MainTree(Text(label))).Menu);
+
+    [Fact]
+    public void 쪽지_탭과_다른_본문_표식이_충돌하면_자동_판정을_보류한다() =>
+        Assert.Equal(MainMenu.Unknown, WindowContextParser.Parse(MainTree(Text("받은 쪽지"), Text("보낸 쪽지"), Text("보관 쪽지"), Text("타 기관 조회"))).Menu);
+
     [Theory]
     [InlineData("대화", MainMenu.Conversations)]
     [InlineData("쪽지", MainMenu.Notes)]

@@ -35,6 +35,7 @@ public static class WindowContextParser
         if (route == "/main/1") return new(OnTalkSurface.Main, MainMenu.Friends);
         if (route == "/organizations") return new(OnTalkSurface.Main, MainMenu.Organization);
         if (route == "/chatrooms") return new(OnTalkSurface.Main, MainMenu.Conversations);
+        if (route == "/notes") return new(OnTalkSurface.Main, MainMenu.Notes);
 
         var selectedMenus = root.DescendantsAndSelf()
             .Where(n => n.Role is "pagetab" or "listitem" or "link" or "pushbutton" &&
@@ -46,9 +47,12 @@ public static class WindowContextParser
 
         // 사이드바에는 모든 메뉴명이 있다. 본문의 고유 표식이 하나인 경우에만 판별한다.
         var markers = new List<MainMenu>();
+        var noteTabs = nodes.Where(n => n.Role == "pagetab" && (n.State & 0x8000) == 0).Select(n => n.Name.Trim()).ToHashSet();
         if (root.StaticTexts().Any(t => t.Trim().StartsWith("나의 그룹", StringComparison.Ordinal))) markers.Add(MainMenu.Friends);
         if (root.ContainsText("타 기관 조회")) markers.Add(MainMenu.Organization);
-        if (root.ContainsText("받은 쪽지함") || root.ContainsText("보낸 쪽지함") || root.ContainsText("보관 쪽지함")) markers.Add(MainMenu.Notes);
+        if (root.ContainsText("받은 쪽지함") || root.ContainsText("보낸 쪽지함") || root.ContainsText("보관 쪽지함") ||
+            (root.ContainsText("받은 쪽지") && root.ContainsText("보낸 쪽지") && root.ContainsText("보관 쪽지")) ||
+            (noteTabs.Contains("받은 쪽지") && noteTabs.Contains("보낸 쪽지") && noteTabs.Contains("보관 쪽지"))) markers.Add(MainMenu.Notes);
         return new(OnTalkSurface.Main, markers.Count == 1 ? markers[0] : MainMenu.Unknown);
     }
 

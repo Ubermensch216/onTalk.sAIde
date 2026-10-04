@@ -15,6 +15,8 @@ dotnet publish (Join-Path $root "src\OnTalk.Sidecar.App") -c Release -r win-x64 
 if ($LASTEXITCODE -ne 0) { throw "묶지 못했습니다." }
 
 Copy-Item (Join-Path $root "README.md") (Join-Path $out "README.md")
+# README의 상대 문서 링크와 사용자 매뉴얼 이미지를 배포 폴더에서도 유지한다.
+Copy-Item -LiteralPath (Join-Path $root "docs") -Destination (Join-Path $out "docs") -Recurse
 Get-ChildItem $out -Filter *.pdb | Remove-Item
 
 $zip = "$out.zip"
