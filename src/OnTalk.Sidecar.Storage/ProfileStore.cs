@@ -14,7 +14,7 @@ public sealed record StoredDraft(string Slot, string Body, DateTimeOffset Update
 /// </summary>
 public sealed partial class ProfileStore : IDisposable
 {
-    private const int SchemaVersion = 8;
+    private const int SchemaVersion = 9;
     private readonly SqliteConnection _db;
 
     public string LoginId { get; }
@@ -263,6 +263,27 @@ public sealed partial class ProfileStore : IDisposable
                     PRIMARY KEY(display_identity, note_id)
                 );
                 PRAGMA user_version = 8;
+                COMMIT;
+                """);
+        }
+        if (version < 9)
+        {
+            Execute(db, """
+                BEGIN;
+                CREATE TABLE home_people (id INTEGER PRIMARY KEY CHECK(id=1), snapshot_json TEXT NOT NULL);
+                CREATE TABLE home_chat (
+                    id INTEGER PRIMARY KEY,
+                    digest_key TEXT NOT NULL UNIQUE,
+                    source_json TEXT NOT NULL,
+                    analysis_json TEXT NOT NULL,
+                    saved_at TEXT NOT NULL
+                );
+                CREATE TABLE home_chat_contact (
+                    chat_id INTEGER NOT NULL REFERENCES home_chat(id) ON DELETE CASCADE,
+                    display_identity TEXT NOT NULL,
+                    PRIMARY KEY(chat_id,display_identity)
+                );
+                PRAGMA user_version = 9;
                 COMMIT;
                 """);
         }

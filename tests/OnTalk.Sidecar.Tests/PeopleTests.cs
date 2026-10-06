@@ -138,7 +138,7 @@ public sealed class ContactStoreTests : IDisposable
             // 합성 DB를 실제 이전 스키마 상태로 만든다. 운영 계정의 저장소는 사용하지 않는다.
             var db = (Microsoft.Data.Sqlite.SqliteConnection)typeof(ProfileStore).GetField("_db", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(store)!;
             using var cmd = db.CreateCommand();
-            cmd.CommandText = "DROP TABLE contact_preparation_group; DROP TABLE task_chat_source; DROP TABLE contact_note_link; PRAGMA user_version=6;";
+            cmd.CommandText = "DROP TABLE home_chat_contact; DROP TABLE home_chat; DROP TABLE home_people; DROP TABLE contact_preparation_group; DROP TABLE task_chat_source; DROP TABLE contact_note_link; PRAGMA user_version=6;";
             cmd.ExecuteNonQuery();
         }
         using var reopened = ProfileStore.Open(_root, "migration");

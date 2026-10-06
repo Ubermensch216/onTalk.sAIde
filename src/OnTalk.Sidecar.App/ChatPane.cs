@@ -33,6 +33,10 @@ public sealed class ChatPane : UserControl, IDisposable
     private ChatSnapshot _latest;
     private readonly TextBlock _coverage = new(), _notice = new(), _status = new(), _summary = new();
     private readonly StackPanel _rows = new(), _points = new();
+    private readonly ComboBox _homeFriend = new();
+    private readonly Button _saveHome = new() { Content = "이 친구의 Home에 정리 연결", IsEnabled = false };
+    private ChatAnalysis? _homeAnalysis;
+    private ChatSnapshot? _homeSource;
     private readonly TextBox _editor = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 150, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly TextBox _instruction = new() { Tag = "답변 목적과 확인한 사실을 적어 주세요" };
     private readonly TextBox _proposal = new() { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, MinHeight = 100 };
@@ -65,12 +69,21 @@ public sealed class ChatPane : UserControl, IDisposable
         var source = Body();
         source.Children.Add(Label("정리에 쓸 원문을 직접 고르세요. 읽힌 텍스트만 표시하며 첨부·이미지·시스템 알림은 분석하지 않습니다.", "Small"));
         source.Children.Add(Button("최근 10건 선택", () => SelectRecent()));
-        source.Children.Add(Button("선택 해제", () => { _selected.Clear(); Invalidate(); RenderMessages(); }));
+        source.Children.Add(Button("선택 해제", () => { _selected.Clear(); ClearHomeAnalysis(); Invalidate(); RenderMessages(); }));
         source.Children.Add(Button("현재 읽힌 범위 다시 불러오기", Reload));
         source.Children.Add(_rows); Tab(tabs, "원문 선택", source);
         var analysis = Body(); analysis.Children.Add(Button("선택한 원문 흐름 정리", async () => await AnalyzeAsync()));
         analysis.Children.Add(Label("AI 요약과 결정·질문·요청 후보입니다. 확정 여부·내 담당 여부는 원문과 이후 대화를 확인하세요.", "Caption"));
-        analysis.Children.Add(_summary); analysis.Children.Add(_points); Tab(tabs, "정리", analysis);
+        analysis.Children.Add(_summary); analysis.Children.Add(_points);
+        analysis.Children.Add(Label("다음 연락 때 이어볼 맥락 · Home", "SectionTitle"));
+        analysis.Children.Add(Label("Home에서 관찰한 친구 중 실제 상대를 고르세요. 연결하면 선택 원문과 AI 정리를 이 계정에 보관합니다.", "Caption"));
+        var friends = _store.GetHomePeople()?.People.GroupBy(p => p.DisplayIdentity).Where(g => g.Count() == 1).Select(g => g.Single()).ToList() ?? [];
+        _homeFriend.ItemsSource = friends;
+        analysis.Children.Add(_homeFriend); analysis.Children.Add(_saveHome);
+        if (friends.Count == 0) analysis.Children.Add(Label("먼저 온톡 Home에서 친구 그룹을 펼쳐 주세요.", "Small"));
+        _homeFriend.SelectionChanged += (_, _) => _saveHome.IsEnabled = _homeAnalysis?.Summary.Trim().Length > 0 && _homeFriend.SelectedItem is ContactPerson;
+        _saveHome.Click += (_, _) => SaveToHome();
+        Tab(tabs, "정리", analysis);
         var reply = Body(); reply.Children.Add(Label("짧은 답변 초안", "SectionTitle")); reply.Children.Add(_editor); reply.Children.Add(_instruction);
         reply.Children.Add(Button("선택한 원문으로 답변 제안", async () => await SuggestAsync()));
         reply.Children.Add(Label("제안 · 원문/현재 글과 비교한 뒤 수락", "Caption")); reply.Children.Add(_proposal); reply.Children.Add(_accept); reply.Children.Add(_undo);
@@ -127,12 +140,14 @@ public sealed class ChatPane : UserControl, IDisposable
     }
     private void Reload()
     {
+        ClearHomeAnalysis();
         _displayed = _latest; _selected.Clear(); _summary.Text = ""; _points.Children.Clear();
         _proposal.Clear(); Invalidate(); RenderMessages();
         _status.Text = "원문 범위를 갱신했습니다. 사용할 메시지를 다시 선택하세요.";
     }
     private void SelectRecent()
     {
+        ClearHomeAnalysis();
         _selected.Clear(); foreach (var message in _displayed.Messages.TakeLast(10)) _selected.Add(message.Key);
         Invalidate(); RenderMessages();
     }
@@ -143,7 +158,7 @@ public sealed class ChatPane : UserControl, IDisposable
         foreach (var message in _displayed.Messages)
         {
             var checkbox = new CheckBox { Content = Label(message.Label, "Body"), IsChecked = _selected.Contains(message.Key) };
-            checkbox.Click += (_, _) => { if (checkbox.IsChecked == true) _selected.Add(message.Key); else _selected.Remove(message.Key); Invalidate(); _coverage.Text = _displayed.Coverage + $"\n선택한 원문 {Chosen.Count}건"; };
+            checkbox.Click += (_, _) => { if (checkbox.IsChecked == true) _selected.Add(message.Key); else _selected.Remove(message.Key); ClearHomeAnalysis(); Invalidate(); _coverage.Text = _displayed.Coverage + $"\n선택한 원문 {Chosen.Count}건"; };
             _rows.Children.Add(checkbox);
         }
         if (_displayed.Messages.Count == 0) _rows.Children.Add(Label("메시지 구조를 읽지 못했습니다. 온톡에서 날짜와 텍스트 메시지를 표시한 뒤 다시 확인하세요.", "Small"));
@@ -157,6 +172,7 @@ public sealed class ChatPane : UserControl, IDisposable
     private async Task AnalyzeAsync()
     {
         var messages = Chosen.ToList(); if (!CheckScope(messages)) return;
+        ClearHomeAnalysis();
         var token = Begin(); var revision = Revision;
         try
         {
@@ -169,10 +185,23 @@ public sealed class ChatPane : UserControl, IDisposable
                 _points.Children.Add(Label($"{kind}: {point.Title}\n{point.Message.Sender} · {point.Message.Date?.ToString("yyyy-MM-dd") ?? "날짜 미확인"} {point.Message.Time}\n근거: {point.Evidence}", "Body"));
             }
             _status.Text = $"선택한 {messages.Count}건 정리 · 원문 근거 불일치 {result.Dropped}건 제외";
+            _homeAnalysis = result; _homeSource = _displayed with { Messages = messages };
+            _saveHome.IsEnabled = _homeFriend.SelectedItem is ContactPerson && result.Summary.Trim().Length > 0;
         }
         catch (OperationCanceledException) { }
         catch (AnalysisUnavailableException ex) { if (!_disposed) _status.Text = ex.Message; }
         finally { _busy = false; }
+    }
+    private void ClearHomeAnalysis()
+    {
+        _homeAnalysis = null; _homeSource = null; _saveHome.IsEnabled = false;
+    }
+    private void SaveToHome()
+    {
+        if (_disposed || !_active || _busy || _homeAnalysis is null || _homeSource is null || _homeFriend.SelectedItem is not ContactPerson person) return;
+        _store.SaveHomeChat(person, _homeSource, _homeAnalysis, DateTimeOffset.Now);
+        _status.Text = $"{person.Name}의 Home에 선택 원문 {_homeSource.Messages.Count}건과 AI 정리를 연결했습니다.";
+        _changed();
     }
     private async Task SuggestAsync()
     {

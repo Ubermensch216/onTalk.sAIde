@@ -99,8 +99,9 @@ internal static class Program
             var context = new SidecarContext(OnTalkSurface.Main, people.Menu);
             var snapshot = new WatchSnapshot(true, []) { AccountCandidate="preview", Contexts=[new WindowContext(hwnd,session,context) { People=people }] };
             Set(panel,"_latestSnapshot",snapshot); Invoke(panel,"ApplyCurrentContext",snapshot);
-            if (((ContentControl)panel.FindName("PeopleHost")).Content is not PeoplePane pane || pane.Chosen.Count != people.SelectedKeys.Count)
-                throw new InvalidOperationException("사람·부서 선택 문맥이 표시되지 않았습니다.");
+            var peopleContent = ((ContentControl)panel.FindName("PeopleHost")).Content;
+            if (people.Menu == MainMenu.Friends ? peopleContent is not HomePane : peopleContent is not PeoplePane pane || pane.Chosen.Count != people.SelectedKeys.Count)
+                throw new InvalidOperationException("Home·부서 선택 문맥이 표시되지 않았습니다.");
             Render((FrameworkElement)panel.Content,Path.Combine(output,name+".png"),360,800);
             Render((FrameworkElement)panel.Content,Path.Combine(output,name+"-short.png"),360,480);
         }
@@ -161,9 +162,75 @@ internal static class Program
         Render((FrameworkElement)helper.Content, Path.Combine(output, "expanded-compose-short.png"), 640, 520);
         helper.Close();
         VerifyChat(store, output);
+        VerifyHome(store, output);
         panel.Close();
         Console.WriteLine($"PASS: 기본 {cases.Length}개 문맥, 사람 선택 {peopleCases.Length}종, 작성 도우미 2종, 대화 4개 탭 · {Directory.GetFiles(output, "*.png").Length}개 이미지 · 선택/원문 고정/입력 비교·충돌·만료/업무 근거/제안 수락 검사. {output}");
         return 0;
+    }
+
+    private static void VerifyHome(ProfileStore store, string output)
+    {
+        var now = DateTimeOffset.Now;
+        var a = new ContactPerson("home:a", "예시 민경", "주무관", ["예시기관", "총무과"]);
+        var b = new ContactPerson("home:b", "예시 지은", "주무관", ["예시기관", "회계과"]);
+        var c = new ContactPerson("home:c", "예시 기승", "팀장", ["예시기관", "복지정책과"]);
+        var people = new PeopleSnapshot(MainMenu.Friends, [a,b,c], [
+            new("home:g1", "프로젝트 TF", ContactScopeKind.Group, [a.Key,b.Key], 4),
+            new("home:g2", "자주 연락하는 동료", ContactScopeKind.Group, [a.Key,c.Key], 2)], [], now);
+        for (var i = 0; i < 3; i++)
+        {
+            var person = new[] { a,b,c }[i];
+            var body = new[] { "10월 점검 결과표를 오늘 중 공유해 주세요. 누락된 항목은 별도로 표시 부탁드립니다.",
+                "사업비 집행 내역의 금액을 다시 확인해 주세요. 수정한 파일은 금요일까지 보내 주세요.",
+                "복지 사업 회의 자료를 공유합니다. 다음 회의 안건을 검토해 주세요." }[i];
+            var saved = store.SaveReceived(new(person.Name, person.Organization.Last(), "오늘 오전 09:30", null, 1, body, []), now.AddDays(-i));
+            store.LinkContactNote(person, saved.NoteId, now);
+            store.SaveAnalysis(saved.NoteId, "synthetic", "home-preview", new(body, [], [], 0), now);
+            if (i < 2) store.AddTask(saved.NoteId, new[] { "10월 점검 결과표 공유", "사업비 집행 금액 재확인" }[i], body, null, HomeDashboard.Day(now).AddDays(i), now);
+        }
+        var messages = new ChatMessage[] {
+            new("home:m1", a.Name, "오전 10:20", HomeDashboard.Day(now), "점검 양식은 기존 파일을 사용하면 될까요?"),
+            new("home:m2", "나", "오전 10:22", HomeDashboard.Day(now), "네, 기존 양식으로 작성하고 누락 항목은 별도로 표시하겠습니다."),
+            new("home:m3", a.Name, "오전 10:25", HomeDashboard.Day(now), "결과표는 오늘 중 공유 부탁드립니다.") };
+        store.SaveHomeChat(a, new("점검 결과 협의", messages, now.AddHours(-1)), new("기존 양식으로 점검 결과를 정리하고, 누락 항목을 따로 표시해 오늘 공유하기로 했습니다.",
+            [new("decision", "기존 양식 사용·누락 항목 별도 표시", messages[1], "기존 양식으로 작성하고 누락 항목은 별도로 표시"),
+             new("action", "점검 결과표 오늘 공유", messages[2], "결과표는 오늘 중 공유")], 0), now);
+        var older = messages.Select(m => m with { Key=m.Key+"older", Date=HomeDashboard.Day(now).AddDays(-2) }).ToList();
+        store.SaveHomeChat(b, new("사업비 검토", older, now.AddDays(-2)), new("사업비 집행 내역의 수정 범위를 확인했습니다. 금액 재검토 후 파일을 공유하는 흐름입니다.", [], 0), now);
+        using var home = new HomePane(store, _=>{}, ()=>{});
+        home.Refresh(people); home.SetActive(true);
+        if (home.Dashboard is not { Notes.Count:3, MessageCount:6, OpenTasks.Count:2 }) throw new InvalidOperationException("Home 합성 집계 오류");
+        Render(home, Path.Combine(output,"home-dashboard-full.png"),360,1520);
+        Render(home, Path.Combine(output,"home-dashboard.png"),360,800);
+        Render(home, Path.Combine(output,"home-dashboard-short.png"),360,480);
+        Render(home, Path.Combine(output,"home-dashboard-125.png"),360,800,1.25);
+        var groups = (ComboBox)Get(home,"_groups"); groups.SelectedIndex=1;
+        if (home.Dashboard!.Notes.Count != 2) throw new InvalidOperationException("Home 그룹 필터 오류");
+        Render(home, Path.Combine(output,"home-group.png"),360,1000);
+        var friends = (ComboBox)Get(home,"_friends"); friends.SelectedIndex=1;
+        if (home.Dashboard!.Notes.Count != 1 || home.Dashboard.MessageCount != 3) throw new InvalidOperationException("Home 친구 필터 오류");
+        Render(home, Path.Combine(output,"home-friend.png"),360,1000);
+        var panel = new PanelWindow(); Set(panel,"_store",store); Set(panel,"_dockedTo",new IntPtr(4321));
+        var snapshot = new WatchSnapshot(true, []) { AccountCandidate="preview", Contexts=[new(new IntPtr(4321),Guid.NewGuid(),new(OnTalkSurface.Main,MainMenu.Friends)) { People=people }] };
+        Set(panel,"_latestSnapshot",snapshot); Invoke(panel,"ApplyCurrentContext",snapshot); Invoke(panel,"UpdateFooter");
+        ((TextBlock)panel.FindName("StatusText")).Text="가상 자료 · Home 화면 예시";
+        Render((FrameworkElement)panel.Content,Path.Combine(output,"home-panel.png"),360,900);
+        Render((FrameworkElement)panel.Content,Path.Combine(output,"home-panel-short.png"),360,480);
+        Render((FrameworkElement)panel.Content,Path.Combine(output,"home-panel-150.png"),360,900,1.5);
+        using var empty = new HomePane(store,_=>{},()=>{}); empty.SetActive(true);
+        Render(empty,Path.Combine(output,"home-empty.png"),360,600);
+        // 대화 정리에서 실제 친구를 선택해 Home에 보관하고, 원문 선택을 바꾸면 저장 제안을 만료한다.
+        using var analyzer = new OllamaAnalyzer(handler:new PreviewAiHandler()); using var writer = new OllamaWriter();
+        var chat = new ChatSnapshot("Home 연결 검증",messages,now);
+        using var pane = new ChatPane(store,analyzer,writer,Guid.NewGuid(),chat,()=>{});
+        pane.SetActive(true); Invoke(pane,"SelectRecent"); Finish((Task)Call(pane,"AnalyzeAsync"));
+        ((ComboBox)Get(pane,"_homeFriend")).SelectedIndex=0;
+        if (!((Button)Get(pane,"_saveHome")).IsEnabled) throw new InvalidOperationException("Home 연결 단추 오류");
+        ((Button)Get(pane,"_saveHome")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        if (!store.GetHomeChats().Any(d=>d.Source.RoomHint==chat.RoomHint)) throw new InvalidOperationException("대화 Home 보관 오류");
+        Invoke(pane,"SelectRecent");
+        if (((Button)Get(pane,"_saveHome")).IsEnabled) throw new InvalidOperationException("선택 변경 후 오래된 Home 정리 연결");
+        Set(panel,"_store",null!); panel.Close();
     }
 
     private static void VerifyChat(ProfileStore store, string output)

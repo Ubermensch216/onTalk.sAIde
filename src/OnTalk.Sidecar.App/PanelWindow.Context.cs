@@ -7,6 +7,7 @@ namespace OnTalk.Sidecar.App;
 
 public partial class PanelWindow
 {
+    private HomePane? _homePane;
     private PeoplePane? _peoplePane;
     private string? _peoplePaneKey;
     private ChatPane? _chatPane;
@@ -117,7 +118,19 @@ public partial class PanelWindow
             EmptyState.Visibility = NoteView.Visibility = ComposeHost.Visibility = PeopleHost.Visibility = ContextView.Visibility = Visibility.Collapsed;
             return;
         }
-        if (context.Surface == OnTalkSurface.Main && context.Menu is MainMenu.Friends or MainMenu.Organization)
+        if (context.Surface == OnTalkSurface.Main && context.Menu == MainMenu.Friends)
+        {
+            _homePane ??= new HomePane(_store, OpenContactCandidate, () => OnOpenTasks(this, new RoutedEventArgs()));
+            _homePane.Refresh(current.People ?? new PeopleSnapshot(MainMenu.Friends, [], [], [], DateTimeOffset.Now));
+            _homePane.SetActive(true);
+            PeopleHost.Content = _homePane;
+            EmptyState.Visibility = NoteView.Visibility = ComposeHost.Visibility = ChatHost.Visibility = ContextView.Visibility = Visibility.Collapsed;
+            PeopleHost.Visibility = Visibility.Visible;
+            ContextHeader.Visibility = Visibility.Collapsed;
+            ContextHint.Text = "친구·그룹별로 이어보는 업무 소통";
+            return;
+        }
+        if (context.Surface == OnTalkSurface.Main && context.Menu == MainMenu.Organization)
         {
             if (_peoplePane is null || _peoplePaneKey != key)
             {

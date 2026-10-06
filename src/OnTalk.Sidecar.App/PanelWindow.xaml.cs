@@ -129,6 +129,7 @@ public partial class PanelWindow : Window
             foreach (var pane in _composePanes.Values) pane.Dispose();
             _chatPane?.Dispose();
             _peoplePane?.Dispose();
+            _homePane?.Dispose();
             _closing.Cancel();
             _watcher.Dispose();
             _analyzer.Dispose();
@@ -272,6 +273,7 @@ public partial class PanelWindow : Window
         _composePanes.Clear();
         _activePane = null;
         _peoplePane?.Dispose(); _peoplePane = null;
+        _homePane?.Dispose(); _homePane = null;
         _peoplePaneKey = null;
         PeopleHost.Content = null;
         _chatPane?.Dispose(); _chatPane = null; _chatPaneKey = null; _conversationsPane = null;
@@ -297,9 +299,9 @@ public partial class PanelWindow : Window
         }
         if (_manageWindow is null)
         {
-            _manageWindow = new ManageWindow(_store, _settings, _onTalkVersion, RestoreBackup, DeleteAllData);
+            _manageWindow = new ManageWindow(_store, _settings, _onTalkVersion, RestoreBackup, DeleteAllData) { Owner = this };
             _manageWindow.Closed += (_, _) => _manageWindow = null;
-            _manageWindow.Show();
+            ShowWorkWindow(_manageWindow);
         }
         _manageWindow.Activate();
     }
@@ -425,6 +427,7 @@ public partial class PanelWindow : Window
     {
         _activePane?.SetActive(false);
         _peoplePane?.SetActive(false);
+        _homePane?.SetActive(false);
         ComposeHost.Visibility = Visibility.Collapsed;
         PeopleHost.Visibility = Visibility.Collapsed;
         _chatPane?.SetActive(false);
@@ -714,9 +717,9 @@ public partial class PanelWindow : Window
         }
         if (_tasksWindow is null)
         {
-            _tasksWindow = new TasksWindow(_store, RefreshWork);
+            _tasksWindow = new TasksWindow(_store, RefreshWork) { Owner = this };
             _tasksWindow.Closed += (_, _) => _tasksWindow = null;
-            _tasksWindow.Show();
+            ShowWorkWindow(_tasksWindow);
         }
         _tasksWindow.Activate();
     }
@@ -766,7 +769,7 @@ public partial class PanelWindow : Window
         var pane = target is not null ? _activePane : null;
         pane?.SetActive(false);
         if (pane is not null) pane.IsEnabled = false;
-        var window = _composeWindow = new ComposeWindow(_store, _writer, source, target, pane?.Draft, preparation);
+        var window = _composeWindow = new ComposeWindow(_store, _writer, source, target, pane?.Draft, preparation) { Owner = this };
         _composeWindow.Closed += (s, _) =>
         {
             if (ReferenceEquals(s, _composeWindow))
@@ -779,7 +782,7 @@ public partial class PanelWindow : Window
                 pane.IsEnabled = true;
             }
         };
-        _composeWindow.Show();
+        ShowWorkWindow(_composeWindow);
     }
 
     private void OnOpenSearch(object sender, RoutedEventArgs e)
@@ -790,12 +793,25 @@ public partial class PanelWindow : Window
         }
         if (_searchWindow is null)
         {
-            _searchWindow = new SearchWindow(_store, _embedder);
+            _searchWindow = new SearchWindow(_store, _embedder) { Owner = this };
             _searchWindow.Closed += (_, _) => _searchWindow = null;
-            _searchWindow.Show();
+            ShowWorkWindow(_searchWindow);
         }
         _searchWindow.Activate();
         EmbedPending();
+    }
+
+    private void ShowWorkWindow(Window window)
+    {
+        // 팝업이 열리는 순간에도 맨 위 패널 아래로 들어가지 않도록 먼저 내려 둔다.
+        Topmost = false;
+        window.Show();
+    }
+
+    private void UpdateTopmost(bool active)
+    {
+        // 작업 중인 팝업을 패널이 다시 덮지 않도록 감시 주기에서도 맨 위 표시를 쉰다.
+        Topmost = active && !OwnedWindows.Cast<Window>().Any(window => window.IsVisible);
     }
 
     /// <summary>뜻 검색용 벡터가 없는 쪽지를 뒤에서 하나씩 채운다. 로컬 AI가 꺼져 있으면 조용히 그만둔다.</summary>
@@ -885,11 +901,11 @@ public partial class PanelWindow : Window
                 Show();
             }
             // 온톡이나 패널을 쓰고 있을 때만 다른 창 위에 둔다.
-            Topmost = _dock.OnTalkForeground || Win32.GetForegroundWindow() == _self;
+            UpdateTopmost(_dock.OnTalkForeground || Win32.GetForegroundWindow() == _self);
             return;
         }
 
-        Topmost = false;
+        UpdateTopmost(false);
         if (target is null)
         {
             Float();

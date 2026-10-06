@@ -45,7 +45,7 @@ public sealed class ContextLinkTests : IDisposable
         {
             store.SaveReceived(Note, Now); store.SaveContactGroup("준비 그룹", new("문의", [Person], "합성", Now), Now);
             var db = (Microsoft.Data.Sqlite.SqliteConnection)typeof(ProfileStore).GetField("_db", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(store)!;
-            using var cmd = db.CreateCommand(); cmd.CommandText = "DROP TABLE task_chat_source; DROP TABLE contact_note_link; PRAGMA user_version=7;"; cmd.ExecuteNonQuery();
+            using var cmd = db.CreateCommand(); cmd.CommandText = "DROP TABLE home_chat_contact; DROP TABLE home_chat; DROP TABLE home_people; DROP TABLE task_chat_source; DROP TABLE contact_note_link; PRAGMA user_version=7;"; cmd.ExecuteNonQuery();
         }
         using var migrated = ProfileStore.Open(_root, "A"); Assert.True(File.Exists(Path.Combine(_root, "A", "notes.db.v7.bak")));
         Assert.Equal(1, migrated.CountNotes()); Assert.Single(migrated.GetContactGroups());
