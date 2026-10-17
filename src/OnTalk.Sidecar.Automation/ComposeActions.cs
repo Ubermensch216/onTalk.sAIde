@@ -42,6 +42,106 @@ public static class ComposeActions
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(4);
 
+    /// <summary>수신자·본문·예약이 모두 비어 있고 대화상자가 열려 있지 않은 새 쪽지 창인지 확인한다.</summary>
+    public static bool IsEmptyNewCompose(ComposeState state) =>
+        state is
+        {
+            Recipients.Count: 0,
+            Body.Length: 0,
+            Reservation: null,
+            DialogOpen: false,
+            SmsChecked: false,
+        };
+
+    /// <summary>이미 열려 있는 온톡 창 가운데 비어 있는 "새 쪽지" 창을 찾는다.</summary>
+    public static IntPtr FindEmptyNewComposeWindow()
+    {
+        foreach (var (hwnd, render) in Win32.VisibleOnTalkWindows())
+        {
+            Win32.ActivateAccessibility(render);
+            if (MsaaReader.ReadTree(render) is { } tree && NoteWindowParser.IsNotePage(tree) &&
+                NoteWindowParser.Parse(tree, DateTimeOffset.Now) is { Kind: NoteWindowKind.Compose, ComposeKind: Core.NoteComposeKind.New, Compose: { } state } &&
+                IsEmptyNewCompose(state))
+            {
+                return hwnd;
+            }
+        }
+        return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// 비어 있는 "새 쪽지" 창을 찾고, 없으면 온톡 본창에서 "쪽지 보내기"를 눌러 새 쪽지 창을 연다.
+    /// 기존에 수신자나 본문이 들어 있는 작성 창은 건드리지 않는다.
+    /// </summary>
+    public static (ActionStatus Status, IntPtr ComposeWindow) EnsureEmptyNewComposeWindow()
+    {
+        var existing = FindEmptyNewComposeWindow();
+        if (existing != IntPtr.Zero)
+        {
+            return (ActionStatus.Ok, existing);
+        }
+
+        // 온톡 본창(windows/renderer/app.html)을 찾는다.
+        var main = IntPtr.Zero;
+        foreach (var (hwnd, render) in Win32.VisibleOnTalkWindows())
+        {
+            Win32.ActivateAccessibility(render);
+            if (MsaaReader.ReadRoot(render) is { } root &&
+                root.Value.Contains("windows/renderer/app.html", StringComparison.OrdinalIgnoreCase))
+            {
+                main = hwnd;
+                break;
+            }
+        }
+        if (main == IntPtr.Zero || Tree(main) is not { } mainTree)
+        {
+            return (ActionStatus.UiNotFound, IntPtr.Zero);
+        }
+
+        // 조직도에서 직원이 선택된 채로 쪽지 보내기를 누르면 선택 인원이 한꺼번에 들어갈 수 있으므로
+        // 먼저 쪽지 목록(#/notes) 화면으로 전환해 빈 새 쪽지 창을 연다.
+        var mainRoot = Win32.FindRenderChild(main) is { } mainRender ? MsaaReader.ReadRoot(mainRender) : null;
+        if (mainRoot is null || !mainRoot.Value.Contains("#/notes", StringComparison.OrdinalIgnoreCase))
+        {
+            if (FindClickable(mainTree, "쪽지") is { } notesNav && Click(main, notesNav))
+            {
+                Until(
+                    () => Tree(main)?.DescendantsAndSelf().Any(n => n.Name.Trim() == "쪽지 보내기") == true,
+                    ready => ready);
+            }
+        }
+
+        if (Tree(main) is not { } refreshedTree ||
+            FindClickable(refreshedTree, "쪽지 보내기") is not { } openBtn ||
+            !Click(main, openBtn))
+        {
+            return (ActionStatus.UiNotFound, IntPtr.Zero);
+        }
+
+        var opened = Until(FindEmptyNewComposeWindow, h => h != IntPtr.Zero);
+        return opened != IntPtr.Zero
+            ? (ActionStatus.Ok, opened)
+            : (ActionStatus.UiNotFound, IntPtr.Zero);
+    }
+
+    /// <summary>열려 있는 "받는 사람 추가" 검색 창을 닫아 다음 사람 검색에 영향이 없게 한다.</summary>
+    public static void CloseUserSearchWindow(IntPtr search)
+    {
+        if (search == IntPtr.Zero || !Win32.IsWindow(search))
+        {
+            return;
+        }
+        if (Tree(search) is { } tree && FindClickable(tree, "취소") is { } cancel && Click(search, cancel))
+        {
+            if (Until(() => !Win32.IsWindow(search) || !Win32.IsWindowVisible(search), gone => gone))
+            {
+                return;
+            }
+        }
+        Win32.PostMessageW(search, Win32.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        Until(() => !Win32.IsWindow(search) || !Win32.IsWindowVisible(search), gone => gone);
+    }
+
     /// <summary>"받는 사람 추가" 창을 열어 이름으로 검색하고 결과 행을 돌려준다. 아무도 고르지 않는다.</summary>
     public static SearchOutcome SearchRecipient(IntPtr compose, string name)
     {
@@ -345,6 +445,11 @@ public static class ComposeActions
 
     private static bool Click(IntPtr hwnd, AccNode node) =>
         Win32.FindRenderChild(hwnd) is { } render && MsaaReader.Invoke(render, node);
+
+    private static AccNode? FindClickable(AccNode tree, string label) =>
+        tree.ButtonLabeled(label) ??
+        tree.DescendantsAndSelf().FirstOrDefault(n =>
+            n.Name.Trim() == label && n.Bounds.Width > 0 && n.Bounds.Height > 0);
 
     private static IntPtr FindUserSearchWindow()
     {

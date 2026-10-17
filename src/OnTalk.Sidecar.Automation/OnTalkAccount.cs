@@ -3,11 +3,13 @@ namespace OnTalk.Sidecar.Automation;
 public static class OnTalkAccount
 {
     /// <summary>화면 해석과 조작을 실제로 확인한 온톡 버전.</summary>
-    public const string VerifiedVersion = "5.4.3";
+    public const string VerifiedVersion = "5.4.9";
+    private static readonly string[] VerifiedVersions = ["5.4.3", VerifiedVersion];
 
     /// <summary>파일 버전은 "5.4.3.0"처럼 자리가 하나 더 붙어 나온다.</summary>
     public static bool IsVerified(string version) =>
-        version == VerifiedVersion || version.StartsWith(VerifiedVersion + ".", StringComparison.Ordinal);
+        VerifiedVersions.Any(verified =>
+            version == verified || version.StartsWith(verified + ".", StringComparison.Ordinal));
 
     /// <summary>실행 중인 온톡의 버전. 읽지 못하면 null.</summary>
     public static string? RunningVersion()

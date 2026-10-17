@@ -6,6 +6,7 @@ namespace OnTalk.Sidecar.Automation;
 
 public static class Win32
 {
+    internal const uint WM_CLOSE = 0x0010;
     internal const uint WM_GETOBJECT = 0x003D;
     internal const uint SMTO_ABORTIFHUNG = 0x0002;
     internal const uint OBJID_CLIENT = 0xFFFFFFFC;
@@ -13,6 +14,10 @@ public static class Win32
     // Chromium이 스크린리더 감지용으로 쓰는 객체 ID. 보조기술이 이 ID로 WM_GETOBJECT를
     // 보내면 브라우저 프로세스의 접근성 트리가 켜진다.
     internal const int ScreenReaderHoneyPotId = 1;
+
+    internal static void ActivateAccessibility(IntPtr renderHwnd) =>
+        SendMessageTimeoutW(renderHwnd, WM_GETOBJECT, IntPtr.Zero,
+            new IntPtr(ScreenReaderHoneyPotId), SMTO_ABORTIFHUNG, 1000, out _);
 
     internal delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
@@ -81,6 +86,9 @@ public static class Win32
     [DllImport("user32.dll")]
     internal static extern IntPtr SendMessageTimeoutW(
         IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeoutMs, out IntPtr result);
+
+    [DllImport("user32.dll")]
+    internal static extern bool PostMessageW(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("oleacc.dll")]
     internal static extern int AccessibleObjectFromWindow(

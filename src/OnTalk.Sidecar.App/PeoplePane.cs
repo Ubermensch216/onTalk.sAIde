@@ -1,273 +1,274 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using OnTalk.Sidecar.Core;
-using OnTalk.Sidecar.Storage;
-using OnTalk.Sidecar.AI;
 
 namespace OnTalk.Sidecar.App;
 
-/// <summary>확인된 목록과 명시적 대상 선택을 사용한다. 자동으로 수신자를 추가하지 않는다.</summary>
+/// <summary>
+/// 온톡 조직도에서 사용자가 선택해 둔 직원을 보여 주고 같은 쪽지 또는 개인별 쪽지를 준비한다.
+/// 온톡이 선택 상태를 알려 주지 않거나 추가 대상이 필요한 경우 직접 추가할 수 있다.
+/// </summary>
 public sealed class PeoplePane : UserControl, IDisposable
 {
-    private readonly ProfileStore _store;
-    private readonly Action<ContactPreparation> _prepare;
-    private readonly Action<StoredNote> _openNote;
-    private readonly TextBlock _coverage = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly TextBlock _selection = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly TextBlock _warning = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly TextBlock _details = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly TextBox _query = new() { Tag = "예: 여비 / 총무과" };
+    private readonly Action<ContactPreparation, bool> _open;
+    private readonly TextBlock _selection = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _emptyNotice = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 4) };
     private readonly StackPanel _rows = new();
-    private readonly StackPanel _history = new();
-    private readonly ComboBox _scopes = new() { DisplayMemberPath = "Name" };
-    private readonly Button _chooseScope = new() { Content = "이 그룹·부서에서 읽은 사람만 고르기", IsEnabled = false };
-    private readonly Expander _scopePanel = new() { Header = "온톡에서 확인한 그룹·부서" };
-    private readonly Expander _detailPanel = new() { Header = "선택한 사람의 담당업무·연락처" };
-    private readonly ComboBox _purpose = new();
-    private readonly ComboBox _savedGroups = new() { DisplayMemberPath = "Label" };
-    private readonly TextBox _groupName = new() { Tag = "연락 준비 그룹 이름" };
-    private readonly Button _start = new() { Content = "고른 대상에게 연락 준비" };
-    private readonly Button _save = new() { Content = "선택한 대상을 연락 준비 그룹으로 저장" };
-    private PeopleSnapshot _snapshot;
-    private List<ContactPerson>? _savedPeople;
-    private string _savedSource = "";
-    private DateTimeOffset _savedObserved;
-    private readonly HashSet<string> _selected = [];
-    private readonly Dictionary<string, ContactPerson> _detailCache = [];
-    private string _nativeSelection = "";
-    private string _renderSignature = "\0";
-    private bool _refreshing;
-    private bool _native;
-    private readonly OllamaWriter? _writer;
-    private CancellationTokenSource? _queryCancel;
-    private long _queryVersion;
-    private IReadOnlyList<string>? _terms;
-    private string? _termQuery;
+    private readonly StackPanel _candidates = new();
+    private readonly Button _addButton = new();
+    private readonly Border _addSection = new();
+    private readonly TextBox _searchBox = new();
+    private readonly Button _same = new() { Content = "선택 직원에게 쪽지 보내기", Margin = new Thickness(0, 8, 0, 0) };
+    private readonly Button _personal = new() { Content = "선택 직원에게 개인별 쪽지 보내기", Margin = new Thickness(0, 6, 0, 0) };
+    private readonly HashSet<string> _excluded = [];
+    private readonly Dictionary<string, ContactPerson> _manual = [];
+    private PeopleSnapshot _snapshot = new(MainMenu.Organization, [], [], [], DateTimeOffset.Now);
+    private List<(ContactPerson Person, bool Native)> _selected = [];
+    private string _nativeSignature = "\0", _rowsSignature = "\0", _candidatesSignature = "\0";
     private bool _disposed, _active = true;
-    private readonly TextBlock _termNotice = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly Button _acceptTerms = new() { Content = "제안 검색어로 후보 찾기", IsEnabled = false };
 
-    public PeoplePane(ProfileStore store, MainMenu menu, Action<ContactPreparation> prepare, Action<StoredNote> openNote, OllamaWriter? writer = null)
+    public PeoplePane(Action<ContactPreparation, bool> open)
     {
-        (_store, _prepare, _openNote) = (store, prepare, openNote);
-        _writer = writer;
-        _snapshot = new(menu, [], [], [], DateTimeOffset.Now);
-        _purpose.ItemsSource = new[] { "문의", "진행 확인", "자료 요청", "감사" }; _purpose.SelectedIndex = 0;
+        _open = open;
         var body = new StackPanel { Margin = new Thickness(12) };
-        body.Children.Add(Label(menu == MainMenu.Friends ? "사람·그룹과 연락 준비" : "담당자 후보와 연락 준비", "SectionTitle"));
-        body.Children.Add(_coverage);
-        var scopeContent = new StackPanel(); scopeContent.Children.Add(_scopes); scopeContent.Children.Add(_chooseScope);
-        _scopePanel.Content = scopeContent; body.Children.Add(_scopePanel);
-        _chooseScope.Click += (_, _) => SelectScope();
-        _query.ToolTip = "이름·소속·직급·확인한 담당업무의 글자 일치 검색. 예: 여비 / 건설과 보상";
-        body.Children.Add(Label(menu == MainMenu.Organization ? "담당업무·소속에서 후보 찾기" : "확인한 사람 찾기", "SectionTitle"));
-        body.Children.Add(_query);
-        _query.TextChanged += (_, _) => { _queryVersion++; _queryCancel?.Cancel(); _terms = null; _termQuery = null; _acceptTerms.IsEnabled = false; _termNotice.Text = ""; RenderRows(); };
-        if (writer is not null)
+
+        // 1. 선택한 직원 카드 레이어 (배경·테두리·그림자로 명확히 구분)
+        var card = new Border
         {
-            var suggest = new Button { Content = "질문에서 검색어 제안" }; suggest.Click += async (_, _) => await SuggestTermsAsync(); body.Children.Add(suggest);
-            body.Children.Add(_termNotice); body.Children.Add(_acceptTerms);
-            _acceptTerms.Click += (_, _) => { if (_terms is null || _disposed || !_active) return; _termQuery = string.Join(" ", _terms); _acceptTerms.IsEnabled = false; _termNotice.Text = "사용한 AI 제안 검색어: " + _termQuery + " · 아래 실제 글자 일치 근거를 확인하세요."; RenderRows(); };
-        }
-        body.Children.Add(new ScrollViewer { Content = _rows, MaxHeight = 250, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
-        body.Children.Add(_selection); body.Children.Add(_warning);
-        _detailPanel.Content = new ScrollViewer { Content = _details, MaxHeight = 160, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        body.Children.Add(_detailPanel);
-        var clear = new Button { Content = "대상 선택 비우기" };
-        clear.Click += (_, _) => { _selected.Clear(); _native = false; RenderRows(); UpdateSelection(); }; body.Children.Add(clear);
-        body.Children.Add(Label("연락 목적", "SectionTitle")); body.Children.Add(_purpose); body.Children.Add(_start);
-        _start.Click += (_, _) => { if (Chosen.Count > 0) _prepare(Preparation()); };
-        body.Children.Add(Label("연락 준비 그룹 · 이 계정에 저장", "SectionTitle")); body.Children.Add(_groupName); body.Children.Add(_save);
-        _save.Click += (_, _) => SaveGroup();
-        body.Children.Add(_savedGroups);
-        var load = new Button { Content = "저장한 연락 후보 불러오기" }; load.Click += (_, _) => LoadGroup(); body.Children.Add(load);
-        var live = new Button { Content = "현재 온톡 목록으로 돌아가기" }; live.Click += (_, _) => { _savedPeople = null; _selected.Clear(); _native = false; _renderSignature = ""; Refresh(_snapshot); }; body.Children.Add(live);
-        var delete = new Button { Content = "저장한 연락 준비 그룹 삭제" }; delete.Click += (_, _) => DeleteGroup(); body.Children.Add(delete);
-        body.Children.Add(_status);
-        body.Children.Add(Label("같은 발신자 이름의 보관 후보", "SectionTitle"));
-        body.Children.Add(Label("한 명을 고르면 최근 최대 8건을 표시합니다. 이름 일치만으로 같은 사람의 자료라고 확정하지 않습니다.", "Caption"));
-        body.Children.Add(_history);
-        body.Children.Add(Label("연락 후보만 작성 도우미로 넘깁니다. 실제 수신자는 온톡 작성창에서 검색하고 소속을 확인한 뒤 추가하세요.", "Caption"));
-        foreach (var element in body.Children.OfType<FrameworkElement>()) element.Margin = new Thickness(0, 6, 0, 0);
+            Style = (Style)FindResource("Card"),
+            Margin = new Thickness(0, 0, 0, 8),
+            Padding = new Thickness(12)
+        };
+        var cardContent = new StackPanel();
+
+        // 헤더: 선택 직원 현황 라벨 + 우측 상단 '추가(아이콘 only)' 단추
+        var headerDock = new DockPanel { LastChildFill = true };
+        _addButton.Style = (Style)FindResource("IconButton");
+        _addButton.FontFamily = (FontFamily)FindResource("IconFont");
+        _addButton.Content = "\uE710"; // Segoe MDL2 Assets Add '+' 아이콘
+        _addButton.FontSize = 13;
+        _addButton.Width = 28;
+        _addButton.Height = 28;
+        _addButton.ToolTip = "직원 직접 추가";
+        _addButton.Click += (_, _) =>
+        {
+            if (_addSection.Visibility == Visibility.Visible)
+            {
+                _addSection.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                _addSection.Visibility = Visibility.Visible;
+                _searchBox.Text = "";
+                _searchBox.Focus();
+            }
+        };
+        DockPanel.SetDock(_addButton, Dock.Right);
+        headerDock.Children.Add(_addButton);
+
+        _selection.Style = (Style)FindResource("SectionTitle");
+        _selection.Margin = new Thickness(0, 4, 8, 4);
+        headerDock.Children.Add(_selection);
+        cardContent.Children.Add(headerDock);
+
+        // 선택 직원이 없을 때의 안내 문구
+        _emptyNotice.Style = (Style)FindResource("Caption");
+        _emptyNotice.Text = "온톡 조직도에서 직원이나 부서를 선택하세요. 우측 상단의 [+] 버튼을 눌러 직원을 직접 추가할 수도 있습니다.";
+        cardContent.Children.Add(_emptyNotice);
+
+        // 선택 직원 목록 스크롤 영역
+        cardContent.Children.Add(new ScrollViewer
+        {
+            Content = _rows,
+            MaxHeight = 260,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Margin = new Thickness(0, 4, 0, 0)
+        });
+        card.Child = cardContent;
+        body.Children.Add(card);
+
+        // 2. 직원 직접 추가 레이어 (기존 직접 고르기 Expander를 해체하여 '+' 버튼과 연동된 인라인 패널로 반영)
+        _addSection.Background = (Brush)FindResource("SurfaceAlt");
+        _addSection.BorderBrush = (Brush)FindResource("Line");
+        _addSection.BorderThickness = new Thickness(1);
+        _addSection.CornerRadius = new CornerRadius(8);
+        _addSection.Padding = new Thickness(10);
+        _addSection.Margin = new Thickness(0, 0, 0, 8);
+        _addSection.Visibility = Visibility.Collapsed;
+
+        var addPanel = new StackPanel();
+        var addHeader = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 0, 0, 6) };
+        var closeAdd = new Button
+        {
+            Style = (Style)FindResource("IconButton"),
+            FontFamily = (FontFamily)FindResource("IconFont"),
+            Content = "\uE711",
+            FontSize = 11,
+            Width = 24,
+            Height = 24,
+            ToolTip = "닫기"
+        };
+        closeAdd.Click += (_, _) => _addSection.Visibility = Visibility.Collapsed;
+        DockPanel.SetDock(closeAdd, Dock.Right);
+        addHeader.Children.Add(closeAdd);
+
+        var addTitle = Label("직원 직접 추가", "SectionTitle");
+        addTitle.Margin = new Thickness(0, 2, 0, 0);
+        addHeader.Children.Add(addTitle);
+        addPanel.Children.Add(addHeader);
+
+        _searchBox.Style = (Style)FindResource("FieldBox");
+        _searchBox.Tag = "이름 또는 부서 검색...";
+        _searchBox.Margin = new Thickness(0, 0, 0, 6);
+        _searchBox.MinHeight = 30;
+        _searchBox.TextChanged += (_, _) => FilterCandidates();
+        addPanel.Children.Add(_searchBox);
+
+        addPanel.Children.Add(new ScrollViewer
+        {
+            Content = _candidates,
+            MaxHeight = 180,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+        });
+        _addSection.Child = addPanel;
+        body.Children.Add(_addSection);
+
+        // 3. 쪽지 발송 버튼
+        _same.Click += (_, _) => Open(false);
+        _personal.Click += (_, _) => Open(true);
+        body.Children.Add(_same);
+        body.Children.Add(_personal);
+
         Content = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        ReloadGroups(); UpdateSelection();
+        Update();
     }
 
     private TextBlock Label(string text, string style) => new() { Text = text, Style = (Style)FindResource(style), TextWrapping = TextWrapping.Wrap };
-    private IReadOnlyList<ContactPerson> Current => _savedPeople ?? _snapshot.People;
-    public IReadOnlyList<ContactPerson> Chosen => Current.Where(p => _selected.Contains(p.SelectionKey)).ToList();
+
+    /// <summary>쪽지 대상. 온톡에서 선택했거나 직접 고른 직원 중 제외하지 않은 사람.</summary>
+    public IReadOnlyList<ContactPerson> Chosen => _selected.Where(s => !_excluded.Contains(s.Person.SelectionKey)).Select(s => s.Person).ToList();
     public string SelectionNotice => _selection.Text;
-    private ContactPreparation Preparation() => new(_purpose.SelectedItem as string ?? "문의", Chosen.ToList(),
-        _savedPeople is not null ? _savedSource : (_native ? "온톡 선택 신호" : "사이드카에서 직접 선택") + " · " + _snapshot.Coverage,
-        _savedPeople is not null ? _savedObserved : _snapshot.ObservedAt);
+
+    private void Open(bool personalized)
+    {
+        var chosen = Chosen;
+        if (_disposed || !_active || chosen.Count == 0) return;
+        _open(new ContactPreparation(chosen, "온톡 조직도 선택 · " + _snapshot.Coverage,
+            chosen.Select(p => p.DirectoryObservedAt ?? _snapshot.ObservedAt).Min()), personalized);
+    }
 
     public void Refresh(PeopleSnapshot snapshot)
     {
-        // 마우스를 패널로 옮기면 온톡의 상세가 사라진다. 같은 화면 행에서 관찰한 상세를 시각과 함께 유지한다.
-        var unique = snapshot.People.GroupBy(p => p.DisplayIdentity).Where(g => g.Count() == 1).Select(g => g.Single().SelectionKey).ToHashSet();
-        foreach (var gone in _detailCache.Keys.Where(k => !unique.Contains(k)).ToList()) _detailCache.Remove(gone);
-        var enriched = snapshot.People.Select(p =>
-        {
-            if (!unique.Contains(p.SelectionKey)) return p;
-            if (p.DetailsObservedAt is not null) _detailCache[p.SelectionKey] = p;
-            return p.DetailsObservedAt is null && _detailCache.TryGetValue(p.SelectionKey, out var previous)
-                ? p with { Duty = previous.Duty, Phone = previous.Phone, Mail = previous.Mail, DetailsObservedAt = previous.DetailsObservedAt } : p;
-        }).ToList();
-        snapshot = snapshot with { People = enriched };
         _snapshot = snapshot;
-        if (_savedPeople is not null) return;
-        _scopePanel.Visibility = snapshot.Scopes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        _chooseScope.IsEnabled = snapshot.Scopes.Count > 0;
-        _coverage.Text = snapshot.Coverage;
-        var native = string.Join("|", snapshot.People.Where(p => snapshot.SelectedKeys.Contains(p.Key)).Select(p => p.SelectionKey).Order());
-        if (_nativeSelection != native)
-        {
-            _nativeSelection = native; _selected.Clear();
-            foreach (var person in snapshot.People.Where(p => snapshot.SelectedKeys.Contains(p.Key))) _selected.Add(person.SelectionKey);
-            _native = _selected.Count > 0;
-        }
-        _selected.IntersectWith(snapshot.People.Select(p => p.SelectionKey));
-        var signature = string.Join("|", snapshot.People.Select(p => p.SelectionKey + p.Status + p.Duty + p.Phone + p.Mail)) +
-            string.Join("|", snapshot.Scopes.Select(s => s.Key + s.Name + string.Join(",", s.MemberKeys) + s.DeclaredCount + s.Selected)) + native;
-        if (_renderSignature == signature) return;
-        _renderSignature = signature;
-        var scopeKey = (_scopes.SelectedItem as ContactScope)?.Key;
-        _scopes.ItemsSource = snapshot.Scopes;
-        var activeScopes = snapshot.Scopes.Where(s => s.Selected).ToList();
-        _scopes.SelectedItem = snapshot.Scopes.FirstOrDefault(s => s.Key == scopeKey) ?? (activeScopes.Count == 1 ? activeScopes[0] : null);
-        RenderRows(); UpdateSelection();
+        var native = snapshot.People.Where(p => snapshot.SelectedKeys.Contains(p.Key)).Select(p => p with { DirectoryObservedAt = snapshot.ObservedAt }).ToList();
+        // 온톡의 선택이 바뀌면 이전 제외 표시는 버린다. 온라인 상태 같은 변화는 선택을 바꾸지 않는다.
+        var signature = string.Join("|", native.Select(p => p.SelectionKey));
+        if (signature != _nativeSignature) { _nativeSignature = signature; _excluded.Clear(); }
+        // 직접 고른 사람은 화면에서 접히거나 사라져도 보관하되, 같은 행의 다른 사람으로 바뀐 경우에는 따라가지 않는다.
+        foreach (var person in snapshot.People.Where(p => _manual.ContainsKey(p.SelectionKey))) _manual[person.SelectionKey] = person with { DirectoryObservedAt = snapshot.ObservedAt };
+        _selected = native.Select(p => (p, true)).Concat(_manual.Values.Where(m => native.All(n => n.SelectionKey != m.SelectionKey)).Select(m => (m, false))).ToList();
+        Update();
     }
 
-    private void RenderRows()
-    {
-        _refreshing = true; _rows.Children.Clear();
-        var query = _termQuery ?? _query.Text;
-        var matches = query.Trim().Length > 0 ? ContactSupport.Find(Current, query) : Current.Select(p => new ContactMatch(p, "")).ToList();
-        foreach (var hit in matches)
-        {
-            var person = hit.Person;
-            var row = new StackPanel();
-            var label = Label(person.Label + (person.Status.Length > 0 ? $"\n현재 표시 상태: {person.Status}" : ""), "Body");
-            var check = new CheckBox { Content = label, IsChecked = _selected.Contains(person.SelectionKey), Margin = new Thickness(0, 7, 0, 7) };
-            check.Click += (_, _) =>
-            {
-                if (_refreshing) return;
-                if (check.IsChecked == true) _selected.Add(person.SelectionKey); else _selected.Remove(person.SelectionKey);
-                _native = false; UpdateSelection();
-            };
-            row.Children.Add(check);
-            if (hit.Evidence.Length > 0) row.Children.Add(Label("확인한 후보 근거\n" + hit.Evidence, "Caption"));
-            _rows.Children.Add(row);
-        }
-        if (matches.Count == 0) _rows.Children.Add(Label("확인한 범위에 일치하는 사람이 없습니다. 온톡에서 부서를 펼치거나 사람 상세를 표시한 뒤 다시 확인하세요.", "Small"));
-        _refreshing = false;
-    }
-
-    private void UpdateSelection()
+    private void Update()
     {
         var chosen = Chosen;
-        _selection.Text = chosen.Count == 0 ? "온톡에서 선택된 사람을 확인하지 못했습니다. 위 목록에서 대상을 직접 고르세요."
-            : $"{(_savedPeople is not null ? "저장한 연락 후보" : _native ? "온톡 선택 신호 확인" : "사이드카에서 직접 선택")} · {chosen.Count}명\n{string.Join(", ", chosen.Select(p => p.Name))}" +
-                (_query.Text.Trim().Length > 0 ? "\n검색 결과 밖의 선택도 유지합니다." : "");
-        _warning.Text = ContactSupport.IdentityWarning(chosen.Count > 0 ? Current.Where(p => chosen.Any(c => c.Name == p.Name)).ToList() : Current);
-        _details.Text = chosen.Count == 1 ? Detail(chosen[0]) : "";
-        _detailPanel.Visibility = chosen.Count == 1 ? Visibility.Visible : Visibility.Collapsed;
-        if (_native && _snapshot.Scopes.Any(s => s.Selected))
-            _selection.Text += "\n선택 그룹·부서: " + string.Join(", ", _snapshot.Scopes.Where(s => s.Selected).Select(s => s.Name)) + " · 읽은 구성원만 포함";
-        _start.IsEnabled = _save.IsEnabled = chosen.Count > 0;
-        _history.Children.Clear();
-        if (chosen.Count != 1) return;
-        var notes = _store.GetContactLinkedNotes(chosen[0]).Concat(_store.GetContactNoteCandidates(chosen[0].Name)).DistinctBy(n => n.Id).ToList();
-        foreach (var note in notes)
+        var rowsSignature = string.Join("|", _selected.Select(s => s.Person.SelectionKey + s.Native + _excluded.Contains(s.Person.SelectionKey)));
+        if (rowsSignature != _rowsSignature)
         {
-            var person = chosen[0];
-            var linkedAt = _store.ContactNoteLinkedAt(person, note.Id);
-            var button = new Button { Content = Label($"{note.Note.SenderName} · {note.Note.SentAtText}\n{note.Note.SenderDetail}\n{Snippet.Make(note.Note.Body, [], 45)}", "Small"), Margin = new Thickness(0, 4, 0, 0) };
-            button.Click += (_, _) => _openNote(note); _history.Children.Add(button);
-            if (linkedAt is { } at) _history.Children.Add(Label($"사용자가 연결 · {at.ToLocalTime():yyyy-MM-dd HH:mm}\n화면 표시 정보에 연결했습니다. 고유 ID 확인이나 자동 동일인 인증은 아닙니다.", "Caption"));
-            var link = new Button { Content = linkedAt is null ? "이 사람의 자료로 직접 연결" : "이 자료 연결 해제", Margin = new Thickness(0, 0, 0, 6) };
-            link.Click += (_, _) =>
+            _rowsSignature = rowsSignature;
+            _rows.Children.Clear();
+            foreach (var (person, native) in _selected)
             {
-                if (linkedAt is null)
+                var excluded = _excluded.Contains(person.SelectionKey);
+                var row = new DockPanel { Margin = new Thickness(0, 4, 0, 4) };
+
+                // 제외 버튼: 텍스트 없는 아이콘(X)으로 표시 (제외 시 되돌리기 아이콘)
+                var toggle = new Button
                 {
-                    if (Dialogs.Show(Window.GetWindow(this), $"{person.Label}\n\n쪽지: {note.Note.SenderName} · {note.Note.SenderDetail}\n{note.Note.SentAtText}\n\n원문을 확인하고 이 사람의 자료로 연결할까요? 같은 표시 정보에 대한 사용자 연결이며 고유 ID 인증은 아닙니다.", "자료 연결", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
-                    _store.LinkContactNote(person, note.Id, DateTimeOffset.Now);
-                }
-                else _store.UnlinkContactNote(person, note.Id);
-                UpdateSelection();
-            };
-            link.IsEnabled = Current.Count(p => p.DisplayIdentity == person.DisplayIdentity) == 1;
-            _history.Children.Add(link);
-            foreach (var task in _store.GetTasks(note.Id).Where(t => !t.Done).Take(3))
-                _history.Children.Add(Label($"이 후보 쪽지의 열린 업무: {task.Title}", "Caption"));
-        }
-        if (notes.Count == 0) _history.Children.Add(Label("같은 발신자 이름으로 보관한 쪽지가 없습니다.", "Small"));
-    }
+                    Style = (Style)FindResource("IconButton"),
+                    FontFamily = (FontFamily)FindResource("IconFont"),
+                    Content = excluded ? "\uE72B" : "\uE711",
+                    FontSize = 11,
+                    Width = 26,
+                    Height = 26,
+                    ToolTip = excluded ? "다시 포함" : "제외",
+                    Margin = new Thickness(6, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                DockPanel.SetDock(toggle, Dock.Right);
+                toggle.Click += (_, _) => { if (!_excluded.Remove(person.SelectionKey)) _excluded.Add(person.SelectionKey); Update(); };
+                row.Children.Add(toggle);
 
-    private async Task SuggestTermsAsync()
-    {
-        if (_writer is null || _disposed || !_active || _query.Text.Trim().Length == 0) return;
-        _queryCancel?.Cancel(); _queryCancel?.Dispose(); _queryCancel = new CancellationTokenSource();
-        var version = ++_queryVersion; _terms = null; _acceptTerms.IsEnabled = false; _termNotice.Text = "로컬 AI로 검색어 제안 중…";
-        try
+                var labelText = person.Label + (native ? "" : "\n직접 선택") + (excluded ? "\n(제외됨)" : "");
+                var label = Label(labelText, excluded ? "Caption" : "Body");
+                if (excluded) label.Opacity = 0.5;
+                row.Children.Add(label);
+
+                _rows.Children.Add(row);
+            }
+        }
+
+        _selection.Text = _selected.Count == 0
+            ? "선택된 직원을 확인하지 못했습니다."
+            : $"선택한 직원 {_selected.Count}명 · 쪽지 대상 {chosen.Count}명";
+        _emptyNotice.Visibility = _selected.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        _same.IsEnabled = _personal.IsEnabled = chosen.Count > 0;
+
+        var candidatesSignature = string.Join("|", _snapshot.People.Select(p => p.SelectionKey));
+        if (candidatesSignature != _candidatesSignature)
         {
-            var terms = await _writer.SuggestContactTermsAsync(_query.Text, _queryCancel.Token);
-            if (_disposed || !_active || version != _queryVersion) return;
-            _terms = terms; _termNotice.Text = "제안 검색어: " + string.Join(" · ", terms) + "\n검토 후 후보 찾기를 누르면 확인한 화면 정보의 글자 일치만 검색합니다."; _acceptTerms.IsEnabled = true;
+            _candidatesSignature = candidatesSignature;
+            _candidates.Children.Clear();
+            foreach (var person in _snapshot.People)
+            {
+                var check = new CheckBox
+                {
+                    Content = Label(person.Label, "Body"),
+                    IsChecked = _manual.ContainsKey(person.SelectionKey),
+                    Margin = new Thickness(0, 5, 0, 5),
+                    Tag = person
+                };
+                check.Click += (_, _) =>
+                {
+                    if (check.IsChecked == true) _manual[person.SelectionKey] = person with { DirectoryObservedAt = _snapshot.ObservedAt };
+                    else _manual.Remove(person.SelectionKey);
+                    Refresh(_snapshot);
+                };
+                _candidates.Children.Add(check);
+            }
+            if (_snapshot.People.Count == 0)
+            {
+                _candidates.Children.Add(Label("읽은 직원이 없습니다. 온톡에서 부서를 펼치세요.", "Small"));
+            }
         }
-        catch (OperationCanceledException) { }
-        catch (AnalysisUnavailableException ex) { if (!_disposed && version == _queryVersion) _termNotice.Text = ex.Message; }
+        else
+        {
+            foreach (var check in _candidates.Children.OfType<CheckBox>())
+            {
+                if (check.Tag is ContactPerson p)
+                    check.IsChecked = _manual.ContainsKey(p.SelectionKey);
+            }
+        }
+        FilterCandidates();
     }
 
-    public void SetActive(bool active)
+    private void FilterCandidates()
     {
-        if (_active != active) { _queryVersion++; _queryCancel?.Cancel(); _acceptTerms.IsEnabled = false; }
-        _active = active; IsEnabled = active && !_disposed;
-    }
-    public void Dispose() { if (_disposed) return; _disposed = true; _queryVersion++; _queryCancel?.Cancel(); IsEnabled = false; }
-
-    private static string Detail(ContactPerson person) =>
-        (person.DetailsObservedAt is { } observed ? $"상세 확인: {observed.ToLocalTime():HH:mm:ss} 당시 표시\n" : "") +
-        (person.Duty.Length > 0 ? "확인한 담당업무: " + person.Duty : "담당업무: 아직 확인하지 못했습니다.") +
-        (person.Phone.Length > 0 ? "\n직장전화: " + person.Phone : "") + (person.Mail.Length > 0 ? "\n메일: " + person.Mail : "");
-
-    private void SelectScope()
-    {
-        if (_scopes.SelectedItem is not ContactScope scope) { _status.Text = "그룹·부서를 먼저 고르세요."; return; }
-        _savedPeople = null; _selected.Clear(); _native = false;
-        foreach (var p in _snapshot.People.Where(p => scope.MemberKeys.Contains(p.Key))) _selected.Add(p.SelectionKey);
-        _status.Text = $"'{scope.Name}'에서 읽은 {_selected.Count}명만 골랐습니다." +
-            (scope.DeclaredCount is { } count ? $" 온톡 표시 {count}명 · 전체 구성원 여부를 확인하세요." : " 부서 전체를 선택한 것으로 간주하지 않습니다.");
-        _coverage.Text = _snapshot.Coverage; RenderRows(); UpdateSelection();
+        var query = _searchBox.Text.Trim();
+        foreach (var element in _candidates.Children)
+        {
+            if (element is CheckBox check && check.Tag is ContactPerson person)
+            {
+                var match = string.IsNullOrEmpty(query) ||
+                            person.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                            person.Label.Contains(query, StringComparison.OrdinalIgnoreCase);
+                check.Visibility = match ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
     }
 
-    private void SaveGroup()
-    {
-        var name = _groupName.Text.Trim();
-        if (name.Length == 0 || Chosen.Count == 0) { _status.Text = "그룹 이름과 연락 대상을 고르세요."; return; }
-        if (_store.GetContactGroups().Any(g => g.Name == name) && Dialogs.Show(Window.GetWindow(this), $"'{name}'의 연락 후보를 지금 선택한 대상으로 바꿀까요?", "그룹 저장", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
-        _store.SaveContactGroup(name, Preparation(), DateTimeOffset.Now); ReloadGroups();
-        _status.Text = "연락 후보를 이 계정에 저장했습니다. 실제 온톡 그룹이나 수신자를 변경하지 않았습니다.";
-    }
-
-    private void ReloadGroups() => _savedGroups.ItemsSource = _store.GetContactGroups();
-    private void LoadGroup()
-    {
-        if (_savedGroups.SelectedItem is not ContactPreparationGroup group) return;
-        _savedPeople = group.People.Select((p, i) => p with { Key = $"saved:{group.Id}:{i}", Status = "" }).ToList();
-        _savedSource = $"저장한 연락 준비 그룹 '{group.Name}' · {group.Source}"; _savedObserved = group.ObservedAt;
-        _selected.Clear(); foreach (var p in _savedPeople) _selected.Add(p.SelectionKey);
-        _scopes.ItemsSource = null;
-        _scopePanel.Visibility = Visibility.Collapsed;
-        _coverage.Text = $"저장한 후보 {group.People.Count}명 · {group.ObservedAt.ToLocalTime():yyyy-MM-dd HH:mm} 당시 정보 · 현재 재확인 필요";
-        _status.Text = "현재 온톡 선택과 별개인 저장 후보입니다. 인사이동·소속을 다시 확인하세요.";
-        RenderRows(); UpdateSelection();
-    }
-
-    private void DeleteGroup()
-    {
-        if (_savedGroups.SelectedItem is not ContactPreparationGroup group || Dialogs.Show(Window.GetWindow(this), $"'{group.Name}'의 저장한 연락 후보를 삭제할까요?", "그룹 삭제", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
-        _store.DeleteContactGroup(group.Id); ReloadGroups(); _status.Text = "저장한 연락 준비 그룹을 삭제했습니다.";
-    }
+    public void SetActive(bool active) { _active = active; IsEnabled = active && !_disposed; }
+    public void Dispose() { if (_disposed) return; _disposed = true; IsEnabled = false; }
 }

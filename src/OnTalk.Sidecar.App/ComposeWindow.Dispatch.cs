@@ -41,6 +41,9 @@ public partial class ComposeWindow
     {
         var ready = !_closed && !_busy && _target != IntPtr.Zero && _state?.DialogOpen == false;
         TargetBox.IsEnabled = !_busy && _lockedTarget is null;
+        PersonalizeButton.IsEnabled = !_busy;
+        PreparedContacts.IsEnabled = !_busy;
+        AddPreparedButton.IsEnabled = !_closed && !_busy && _activeItem is null && _preparedPeople.Count > 0;
         ApplyButton.IsEnabled = ready;
         SendButton.IsEnabled = ready;
         OnTalkControls.IsEnabled = ready;
@@ -223,6 +226,7 @@ public partial class ComposeWindow
 
     private async void OnSend(object sender, RoutedEventArgs e)
     {
+        if (_busy || _closed) return;
         var final = Final;
         if (DraftText.UnfilledPlaceholders(final) is { Count: > 0 } unfilled)
         {
@@ -253,6 +257,7 @@ public partial class ComposeWindow
             Result("온톡 작성 창을 찾지 못해 보내지 않았습니다.", ok: false);
             return;
         }
+        if (_closed || !CheckPersonalizedTarget(state)) return;
         // 확인 창에는 초안이 아니라 지금 온톡 창에 실제로 들어 있는 내용을 보여 준다.
         var expected = new ExpectedCompose(state.Recipients, final, state.Reservation, state.SmsChecked);
         if (ComposeActions.Difference(state, expected) is { } problem)
@@ -268,8 +273,14 @@ public partial class ComposeWindow
         }
 
         // 누르기 전에 기록한다. 누른 뒤 앱이 죽어도 "보냈을 수 있다"는 기록이 남는다.
+        RecordPersonalizedAttempt(-1, final, "전송 준비 기록 · 결과 확인 필요");
         var id = _store.BeginDispatch(state.Recipients, final, state.Reservation, DateTimeOffset.Now);
-        var outcome = await RunOnTalk("온톡의 전송 단추를 누르는 중", () => ComposeActions.Send(hwnd, expected));
+        RecordPersonalizedAttempt(id, final, "전송 시도 · 결과 확인 필요");
+        SendOutcome outcome;
+        try { outcome = await RunOnTalk("온톡의 전송 단추를 누르는 중", () => ComposeActions.Send(hwnd, expected)); }
+        catch (Exception ex) { if (!_closed) Result("전송 결과를 확인하지 못했습니다. 자동 재전송하지 않습니다. " + ex.Message, false); return; }
+        if (_closed) return;
+        RecordPersonalizedAttempt(id, final, outcome.Status switch { SendStatus.WindowClosed => state.Reservation is null ? "작성창 닫힘 · 도착 미확인" : "예약 시도 후 작성창 닫힘 · 등록 확인 필요", SendStatus.StillOpen => "결과 불명 · 직접 확인 필요", _ => "미전송 · 직접 확인 필요" });
         ControlStatus.Text = "";
         var kind = state.Reservation is { } at ? $"{at:yyyy-MM-dd HH:mm} 예약 등록" : "전송";
         switch (outcome.Status)
@@ -282,6 +293,7 @@ public partial class ComposeWindow
                 _picked.Clear();
                 Result($"전송 단추를 눌렀고 온톡 작성 창이 닫혔습니다({kind}). 상대에게 도착했는지는 여기서 확인하지 못하니 " +
                        "온톡 보낸 쪽지함에서 확인하세요. 보낸 초안은 비웠습니다.", ok: true);
+                if (_activeItem is not null) _personalizedWindow?.SelectNextPending();
                 break;
             case SendStatus.StillOpen:
                 _store.FinishDispatch(id, DispatchStatus.StillOpen, outcome.Detail);

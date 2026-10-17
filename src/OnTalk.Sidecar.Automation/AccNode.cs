@@ -34,6 +34,9 @@ public sealed record AccNode(string Role, string Name, string Value, int State, 
     public bool HasAction { get; init; }
     public bool IsTruncated { get; init; }
 
+    /// <summary>웹 요소의 CSS 클래스(IAccessible2). 조직도처럼 선택 상태를 MSAA 상태로 알리지 않는 화면에서만 읽는다.</summary>
+    public string Class { get; init; } = "";
+
     public IEnumerable<AccNode> DescendantsAndSelf()
     {
         yield return this;

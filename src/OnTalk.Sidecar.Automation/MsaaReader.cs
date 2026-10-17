@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Accessibility;
 
 namespace OnTalk.Sidecar.Automation;
@@ -35,8 +36,10 @@ internal static class MsaaReader
         var context = readContentText ? WindowContextParser.Parse(Read(root, [], "", false)) : null;
         readContentText = context?.Surface == OnTalk.Sidecar.Core.OnTalkSurface.Chat ||
             context is { Surface: OnTalk.Sidecar.Core.OnTalkSurface.Main, Menu: OnTalk.Sidecar.Core.MainMenu.Conversations };
+        // 조직도·친구의 확인란은 체크 여부를 MSAA 상태로 알리지 않고 CSS 클래스(ant-*-checkbox-checked)로만 바뀔 수 있다.
+        var readClasses = context is { Surface: OnTalk.Sidecar.Core.OnTalkSurface.Main, Menu: OnTalk.Sidecar.Core.MainMenu.Organization or OnTalk.Sidecar.Core.MainMenu.Friends };
         var budget = MaxNodes;
-        var tree = ReadSubtree(root, "", ref budget, readEditableValues, readContentText);
+        var tree = ReadSubtree(root, "", ref budget, readEditableValues, readContentText, readClasses);
         return tree with { IsTruncated = budget <= 0 };
     }
 
@@ -98,7 +101,7 @@ internal static class MsaaReader
             : null;
     }
 
-    private static AccNode ReadSubtree(IAccessible acc, string path, ref int budget, bool readEditableValues, bool readContentText)
+    private static AccNode ReadSubtree(IAccessible acc, string path, ref int budget, bool readEditableValues, bool readContentText, bool readClasses = false)
     {
         budget--;
         var children = new List<AccNode>();
@@ -113,12 +116,55 @@ internal static class MsaaReader
                     // 정수 자식 ID(단순 요소)는 Chromium 웹 콘텐츠에서 쓰이지 않는다.
                     if (raw[i] is IAccessible child)
                     {
-                        children.Add(ReadSubtree(child, path.Length == 0 ? $"{i}" : $"{path}/{i}", ref budget, readEditableValues, readContentText));
+                        children.Add(ReadSubtree(child, path.Length == 0 ? $"{i}" : $"{path}/{i}", ref budget, readEditableValues, readContentText, readClasses));
                     }
                 }
             }
         }
-        return Read(acc, children, path, readEditableValues, readContentText);
+        var node = Read(acc, children, path, readEditableValues, readContentText);
+        return readClasses && node.Role == "SPAN" ? node with { Class = ClassOf(acc) } : node;
+    }
+
+    [ComImport, Guid("6d5140c1-7436-11ce-8034-00aa006009fa"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IServiceProvider { [PreserveSig] int QueryService(ref Guid service, ref Guid riid, out IntPtr obj); }
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetAttributes(IntPtr self, out IntPtr attributes);
+    private static readonly Guid IidAccessible2 = new("E89F726E-C4F4-4c19-BB19-B647D7FA8478");
+    // IAccessible2::get_attributes. IUnknown 3 + IDispatch 4 + IAccessible 21 + IAccessible2 앞 17개 메서드 다음 자리.
+    private const int GetAttributesSlot = 45;
+
+    /// <summary>Chromium IAccessible2 개체 특성의 class 값. 얻지 못하면 빈 문자열.</summary>
+    private static string ClassOf(IAccessible acc)
+    {
+        if (acc is not IServiceProvider provider) return "";
+        var service = typeof(IAccessible).GUID; var iid = IidAccessible2;
+        IntPtr ia2;
+        try { if (provider.QueryService(ref service, ref iid, out ia2) != 0 || ia2 == IntPtr.Zero) return ""; }
+        catch { return ""; }
+        try
+        {
+            var slot = Marshal.ReadIntPtr(Marshal.ReadIntPtr(ia2), GetAttributesSlot * IntPtr.Size);
+            if (Marshal.GetDelegateForFunctionPointer<GetAttributes>(slot)(ia2, out var bstr) != 0 || bstr == IntPtr.Zero) return "";
+            var text = Marshal.PtrToStringBSTR(bstr); Marshal.FreeBSTR(bstr);
+            return ParseClass(text);
+        }
+        catch { return ""; }
+        finally { Marshal.Release(ia2); }
+    }
+
+    /// <summary>"display:block;tag:span;class:a b;" 형식에서 class 값만 꺼낸다. 역슬래시 이스케이프를 푼다.</summary>
+    internal static string ParseClass(string attributes)
+    {
+        var parts = new List<string>(); var current = new System.Text.StringBuilder();
+        for (var i = 0; i < attributes.Length; i++)
+        {
+            if (attributes[i] == '\\' && i + 1 < attributes.Length) { current.Append(attributes[++i]); continue; }
+            if (attributes[i] == ';') { parts.Add(current.ToString()); current.Clear(); continue; }
+            current.Append(attributes[i]);
+        }
+        parts.Add(current.ToString());
+        return parts.FirstOrDefault(p => p.StartsWith("class:", StringComparison.Ordinal))?["class:".Length..] ?? "";
     }
 
     private static AccNode Read(IAccessible acc, IReadOnlyList<AccNode> children, string path, bool readEditableValues = true, bool readContentText = false)

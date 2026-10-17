@@ -101,7 +101,7 @@ public sealed class HomeDashboardTests : IDisposable
             store.SaveReceived(Note(), Now);
             var db = (Microsoft.Data.Sqlite.SqliteConnection)typeof(ProfileStore).GetField("_db", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(store)!;
             using var cmd = db.CreateCommand();
-            cmd.CommandText = "DROP TABLE home_chat_contact; DROP TABLE home_chat; DROP TABLE home_people; PRAGMA user_version=8;"; cmd.ExecuteNonQuery();
+            cmd.CommandText = "DROP TABLE personalized_work; DROP TABLE home_chat_contact; DROP TABLE home_chat; DROP TABLE home_people; PRAGMA user_version=8;"; cmd.ExecuteNonQuery();
         }
         using (var migrated = ProfileStore.Open(_root, "a"))
         {
@@ -113,6 +113,41 @@ public sealed class HomeDashboardTests : IDisposable
         ProfileBackup.Restore(Path.Combine(_root, "restored"), "a", backup, "home-test-password");
         using var restored = ProfileStore.Open(Path.Combine(_root, "restored"), "a");
         Assert.Single(restored.GetHomePeople()!.People); Assert.Equal(1, restored.GetHomeDashboard([A], Now, 7).MessageCount);
+    }
+
+    [Fact]
+    public void 그룹_발송이력은_구성원_이름이_포함된_기록만_기간내에서_최신순으로_보여준다()
+    {
+        using var store = ProfileStore.Open(_root, "a");
+        var c = new ContactPerson("c", "박서준", "주무관", ["기획과"]);
+        var old = store.BeginDispatch(["김민경"], "오래된 쪽지", null, Now.AddDays(-20));
+        var first = store.BeginDispatch(["김민경", "박서준"], "첫 쪽지", null, Now.AddDays(-2));
+        var second = store.BeginDispatch(["박서준", "외부인"], "둘째 쪽지", new DateTime(2026, 10, 7, 9, 0, 0), Now.AddHours(-1));
+        var other = store.BeginDispatch(["외부인"], "무관한 쪽지", null, Now.AddHours(-1));
+        var blocked = store.BeginDispatch(["김민경"], "막힌 쪽지", null, Now.AddHours(-3));
+        store.FinishDispatch(first, DispatchStatus.WindowClosed, ""); store.FinishDispatch(blocked, DispatchStatus.NotSent, "");
+        var week = GroupHistory.Build([A, c], store.GetDispatches(), Now, 7);
+        Assert.Equal([second, first], week.Dispatches.Select(d => d.Record.Id));
+        Assert.Equal(["박서준"], week.Dispatches[0].MatchedNames); Assert.Equal(2, week.MemberCount);
+        Assert.Equal(1, week.ConfirmedCount); Assert.False(week.HasHomonyms);
+        Assert.Equal(3, GroupHistory.Build([A, c], store.GetDispatches(), Now, null).Dispatches.Count);
+        Assert.Equal([first], GroupHistory.Build([A], store.GetDispatches(), Now, 7).Dispatches.Select(d => d.Record.Id));
+        Assert.True(GroupHistory.Build([A, B], store.GetDispatches(), Now, 7).HasHomonyms);
+        Assert.Empty(GroupHistory.Build([], store.GetDispatches(), Now, null).Dispatches);
+    }
+    [Fact]
+    public void 최근_쪽지는_받은_쪽지와_보낸_쪽지를_최신순으로_합친다()
+    {
+        using var store = ProfileStore.Open(_root, "a");
+        var linked = store.SaveReceived(Note("연결한 쪽지"), Now.AddHours(-4)).NoteId;
+        store.LinkContactNote(A, linked, Now);
+        store.SaveReceived(Note("이름만 같은 쪽지"), Now.AddHours(-1));
+        var sent = store.BeginDispatch([A.Name], "보낸 쪽지", null, Now.AddHours(-2));
+        store.FinishDispatch(sent, DispatchStatus.WindowClosed, "");
+        var feed = RecentNote.Build(store.GetHomeDashboard([A], Now, 7), GroupHistory.Build([A], store.GetDispatches(), Now, 7));
+        Assert.Equal(["이름만 같은 쪽지", "보낸 쪽지", "연결한 쪽지"], feed.Select(n => n.Body));
+        Assert.Equal([RecentNoteDirection.Received, RecentNoteDirection.Sent, RecentNoteDirection.Received], feed.Select(n => n.Direction));
+        Assert.False(feed[0].Linked); Assert.True(feed[2].Linked); Assert.Equal(sent, feed[1].Sent!.Record.Id);
     }
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }

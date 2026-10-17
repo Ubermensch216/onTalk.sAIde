@@ -31,7 +31,9 @@ internal static class Program
         var app = new Application();
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
         app.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/OnTalk.sAIde;component/Theme.xaml", UriKind.Relative)));
-        using var store = ProfileStore.Open(Path.Combine(output, "synthetic-profile"), "preview");
+        var profileDir = Path.Combine(output, "synthetic-profile");
+        if (Directory.Exists(profileDir)) Directory.Delete(profileDir, true);
+        using var store = ProfileStore.Open(profileDir, "preview");
         store.SaveGroup("예시 업무 그룹", [new Recipient("예시 담당자", "주무관", ["예시기관 총무팀"]) ]);
         var panel = new PanelWindow();
         Set(panel, "_store", store);
@@ -84,7 +86,7 @@ internal static class Program
         }
         var personA = new ContactPerson("A", "예시 담당자", "주무관", ["예시기관", "총무과"], "온라인", "출장 여비 정산", "000-000-0000") { DetailsObservedAt = DateTimeOffset.Now };
         var personB = new ContactPerson("B", "예시 담당자", "주무관", ["예시기관", "회계과"], "오프라인");
-        store.SaveReceived(new ReceivedNote(personA.Name, "주무관 · 총무과", "10월 4일 오전 10:00", null, 1, "출장 정산 자료를 공유해 주세요.", []), DateTimeOffset.Now);
+        var seeded = store.SaveReceived(new ReceivedNote(personA.Name, "주무관 · 총무과", "10월 4일 오전 10:00", null, 1, "출장 정산 자료를 공유해 주세요.", []), DateTimeOffset.Now);
         var peopleCases = new[]
         {
             ("friends-person", new PeopleSnapshot(MainMenu.Friends, [personA, personB], [], ["A"], DateTimeOffset.Now)),
@@ -105,22 +107,26 @@ internal static class Program
             Render((FrameworkElement)panel.Content,Path.Combine(output,name+".png"),360,800);
             Render((FrameworkElement)panel.Content,Path.Combine(output,name+"-short.png"),360,480);
         }
-        ContactPreparation? prepared = null;
-        var contacts = new PeoplePane(store, MainMenu.Friends, p=>prepared=p, _=>{});
-        contacts.Refresh(peopleCases[0].Item2);
-        contacts.Refresh(peopleCases[0].Item2 with { People=[personA with { Duty="", Phone="", DetailsObservedAt=null }, personB] });
-        if (contacts.Chosen.Single().Duty != personA.Duty) throw new InvalidOperationException("일시 상세가 시각과 함께 보존되지 않았습니다.");
-        contacts.Refresh(peopleCases[0].Item2 with { SelectedKeys=["B"] });
+        ContactPreparation? prepared = null; var personalizeRequested = false;
+        using var contacts = new PeoplePane((p, personalize) => { prepared = p; personalizeRequested = personalize; });
+        var organization = peopleCases[2].Item2;
+        var click = new RoutedEventArgs(ButtonBase.ClickEvent);
+        contacts.Refresh(organization);
+        if (contacts.Chosen.Single().Key != "A") throw new InvalidOperationException("온톡에서 선택한 직원이 표시되지 않았습니다.");
+        contacts.Refresh(organization with { SelectedKeys=["B"] });
         if (contacts.Chosen.Single().Key != "B") throw new InvalidOperationException("같은 목록에서 바뀐 선택이 반영되지 않았습니다.");
-        contacts.Refresh(peopleCases[0].Item2 with { SelectedKeys=[] });
-        var list = (StackPanel)Get(contacts,"_rows");
-        var checkbox = (CheckBox)((StackPanel)list.Children[0]).Children[0]; checkbox.IsChecked=true; checkbox.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-        if (!contacts.SelectionNotice.Contains("직접 선택")) throw new InvalidOperationException("수동 선택을 온톡 선택으로 잘못 표시했습니다.");
-        ((Button)Get(contacts,"_start")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-        if (prepared?.People.Count != 1 || !prepared.InitialDraft.Contains("{문의할 내용}")) throw new InvalidOperationException("연락 준비가 누락됐습니다.");
-        // 같은 행 주소에 다른 사람이 나타나면 선택을 유지하지 않는다.
-        contacts.Refresh(peopleCases[0].Item2 with { People=[personA with { Name="다른 사람" },personB], SelectedKeys=[] });
-        if (contacts.Chosen.Count != 0) throw new InvalidOperationException("교체된 사람에게 이전 선택이 남았습니다.");
+        contacts.Refresh(organization with { SelectedKeys=["A","B"] });
+        var rows = (StackPanel)Get(contacts,"_rows");
+        ((Button)((DockPanel)rows.Children[0]).Children[0]).RaiseEvent(click);
+        if (contacts.Chosen.Single().Key != "B") throw new InvalidOperationException("개별 제외가 반영되지 않았습니다.");
+        ((Button)Get(contacts,"_same")).RaiseEvent(click);
+        if (prepared?.People.Count != 1 || personalizeRequested) throw new InvalidOperationException("같은 쪽지 준비가 누락됐습니다.");
+        ((Button)Get(contacts,"_personal")).RaiseEvent(click);
+        if (!personalizeRequested) throw new InvalidOperationException("개인별 쪽지 준비가 누락됐습니다.");
+        contacts.Refresh(organization with { SelectedKeys=[] });
+        if (contacts.Chosen.Count != 0 || ((Button)Get(contacts,"_same")).IsEnabled) throw new InvalidOperationException("선택이 없는데 쪽지를 보낼 수 있습니다.");
+        var candidate = (CheckBox)((StackPanel)Get(contacts,"_candidates")).Children[0]; candidate.IsChecked = true; candidate.RaiseEvent(click);
+        if (contacts.Chosen.Single().Key != "A" || !contacts.SelectionNotice.Contains("1명")) throw new InvalidOperationException("온톡 선택이 없을 때 직접 고른 직원이 반영되지 않았습니다.");
         using var preparationWriter = new OllamaWriter();
         var preparedHelper = new ComposeWindow(store, preparationWriter, null, preparation:prepared);
         if (((ComboBox)preparedHelper.FindName("TargetBox")).SelectedItem is not null || ((Button)preparedHelper.FindName("SendButton")).IsEnabled)
@@ -129,10 +135,60 @@ internal static class Program
             throw new InvalidOperationException("연락 후보를 수신자 검색 준비로 넘기지 못했습니다.");
         Render((FrameworkElement)preparedHelper.Content,Path.Combine(output,"prepared-contact-compose.png"),680,780);
         Render((FrameworkElement)preparedHelper.Content,Path.Combine(output,"prepared-contact-compose-short.png"),640,520);
+        var personalItem = new PersonalizedWorkItem { Person = personA, Body = "개인 본문" };
+        Set(preparedHelper, "_activeItem", personalItem);
+        ((TextBox)preparedHelper.FindName("Editor")).Text = personalItem.Body;
+        Set(preparedHelper, "_targetSession", session); Set(preparedHelper, "_personalizedSession", session);
+        ((List<Recipient>)Get(preparedHelper, "_picked")).Add(new(personA.Name, personA.Title, personA.Organization));
+        bool Guard(ComposeState state) => (bool)preparedHelper.GetType().GetMethod("CheckPersonalizedTarget", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(preparedHelper, [state])!;
+        var personalState = new ComposeState([personA.Name], "", 0, 4000, false, false, default);
+        if (!Guard(personalState) || Guard(personalState with { Recipients = [personA.Name, personB.Name] }) || Guard(personalState with { SmsChecked = true })) throw new InvalidOperationException("개인 수신자 보호 실패");
+        personalItem.DispatchId = 1;
+        if (Guard(personalState)) throw new InvalidOperationException("개인 쪽지 재발송 보호 실패");
         preparedHelper.Close();
+        var personal = new PersonalizedWindow(
+            store,
+            [personA, personB],
+            "{소속} {이름} ({직급})님, {과정명} 일정은 {교육일시}입니다.",
+            (_, _) => Task.CompletedTask,
+            new PreviewPersonalizedAutomation([personA, personB]));
+        var work = (PersonalizedWork)Get(personal, "_work");
+        var imported = PersonalizedImport.ReadCsv(
+            "이름,소속,직급,과정명,교육일시\r\n" +
+            $"{personA.Name},{string.Join(" / ", personA.Organization)},{personA.Title},개인정보 보호 교육,10월 22일 14:00\r\n" +
+            $"{personB.Name},{string.Join(" / ", personB.Organization)},{personB.Title},정보보안 실무 과정,10월 23일 10:00\r\n");
+        if (!imported.Ready || PersonalizedImport.Match(work, imported).Count > 0) throw new InvalidOperationException("개인별 CSV 헤더 가져오기 실패");
+        Invoke(personal, "Load");
+        Buttons(personal.Content).Single(b => b.Content?.ToString()!.StartsWith("서식으로") == true).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        if (!work.Items[0].Body.Contains("개인정보 보호 교육") || !work.Items[1].Body.Contains("10월 23일 10:00")) throw new InvalidOperationException("개인별 본문 생성 실패");
+        var grid = (DataGrid)Get(personal, "_grid");
+        ((TextBox)Get(personal, "_preview")).Text = "개별 수정한 본문";
+        grid.SelectedIndex = 1;
+        if (work.Items[0].Body != "개별 수정한 본문") throw new InvalidOperationException("개별 수정 유실");
+        Render((FrameworkElement)personal.Content, Path.Combine(output, "personalized-notes.png"), 900, 900);
+        var keptValue = work.Items[1].Values["교육일시"]; work.Items[1].Values["교육일시"] = "";
+        Invoke(personal, "RefreshGrid");
+        Render((FrameworkElement)personal.Content, Path.Combine(output, "personalized-notes-empty.png"), 900, 900);
+        work.Items[1].Values["교육일시"] = keptValue; Invoke(personal, "RefreshGrid");
+        var savedList = new StackPanel { Background = System.Windows.Media.Brushes.White, Margin = new Thickness(8) };
+        foreach (var w in new[] { work, new PersonalizedWork { Template = "안내", Items = work.Items } })
+            savedList.Children.Add(new ComboBoxItem { Content = w, ContentTemplate = ((ComboBox)Get(personal, "_saved")).ItemTemplate });
+        Render(savedList, Path.Combine(output, "personalized-saved-list.png"), 520, 140);
+        Render((FrameworkElement)personal.Content, Path.Combine(output, "personalized-notes-full.png"), 900, 1700);
+        Render((FrameworkElement)personal.Content, Path.Combine(output, "personalized-notes-short.png"), 700, 560);
+        Finish(personal.RunBatchAsync());
+        if (work.Items.Any(i => !i.Attempted || !i.Status.Contains("발송 완료")))
+            throw new InvalidOperationException("개인별 쪽지 자동 연속 발송 검증 실패");
+        var tagged = new PersonalizedWork { Draft = true, TemplateName = "교육 일정 안내", Items = [new() { Person = personA }] };
+        var partial = new PersonalizedWork { TemplateName = "인사평정 결과 안내", Items = [new() { Person = personA, DispatchId = 1, Status = "발송 완료 · 작성창 닫힘" }, new() { Person = personB }] };
+        var tagList = new StackPanel { Background = System.Windows.Media.Brushes.White, Margin = new Thickness(8) };
+        foreach (var w in new[] { tagged, work, partial })
+            tagList.Children.Add(new ComboBoxItem { Content = w, ContentTemplate = ((ComboBox)Get(personal, "_saved")).ItemTemplate });
+        Render(tagList, Path.Combine(output, "personalized-saved-tags.png"), 520, 200);
+        personal.Close();
         using var candidateEmbedder = new OllamaEmbedder();
         var candidateSearch = new SearchWindow(store, candidateEmbedder);
-        var candidateNote = store.GetContactNoteCandidates(personA.Name).First();
+        var candidateNote = store.GetNote(seeded.NoteId)!;
         candidateSearch.ShowContactCandidate(candidateNote);
         if (((TextBox)candidateSearch.FindName("DetailBody")).Text != candidateNote.Note.Body ||
             !((TextBlock)candidateSearch.FindName("DetailNotice")).Text.Contains("같은 사람인지"))
@@ -197,7 +253,11 @@ internal static class Program
              new("action", "점검 결과표 오늘 공유", messages[2], "결과표는 오늘 중 공유")], 0), now);
         var older = messages.Select(m => m with { Key=m.Key+"older", Date=HomeDashboard.Day(now).AddDays(-2) }).ToList();
         store.SaveHomeChat(b, new("사업비 검토", older, now.AddDays(-2)), new("사업비 집행 내역의 수정 범위를 확인했습니다. 금액 재검토 후 파일을 공유하는 흐름입니다.", [], 0), now);
-        using var home = new HomePane(store, _=>{}, ()=>{});
+        var dispatch1 = store.BeginDispatch([a.Name, b.Name], "10월 점검 일정과 제출 양식을 안내드립니다. 금요일까지 회신 부탁드립니다.", null, now.AddHours(-3));
+        store.FinishDispatch(dispatch1, DispatchStatus.WindowClosed, "");
+        var dispatch2 = store.BeginDispatch([c.Name], "복지 사업 회의 안건 검토 요청드립니다.", now.AddDays(1).DateTime, now.AddDays(-1));
+        store.FinishDispatch(dispatch2, DispatchStatus.WindowClosed, "");
+        using var home = new HomePane(store, ()=>{});
         home.Refresh(people); home.SetActive(true);
         if (home.Dashboard is not { Notes.Count:3, MessageCount:6, OpenTasks.Count:2 }) throw new InvalidOperationException("Home 합성 집계 오류");
         Render(home, Path.Combine(output,"home-dashboard-full.png"),360,1520);
@@ -217,7 +277,7 @@ internal static class Program
         Render((FrameworkElement)panel.Content,Path.Combine(output,"home-panel.png"),360,900);
         Render((FrameworkElement)panel.Content,Path.Combine(output,"home-panel-short.png"),360,480);
         Render((FrameworkElement)panel.Content,Path.Combine(output,"home-panel-150.png"),360,900,1.5);
-        using var empty = new HomePane(store,_=>{},()=>{}); empty.SetActive(true);
+        using var empty = new HomePane(store,()=>{}); empty.SetActive(true);
         Render(empty,Path.Combine(output,"home-empty.png"),360,600);
         // 대화 정리에서 실제 친구를 선택해 Home에 보관하고, 원문 선택을 바꾸면 저장 제안을 만료한다.
         using var analyzer = new OllamaAnalyzer(handler:new PreviewAiHandler()); using var writer = new OllamaWriter();
@@ -387,7 +447,64 @@ internal static class Program
         }
     }
 
+    private sealed class PreviewPersonalizedAutomation(IReadOnlyList<ContactPerson> people) : IPersonalizedAutomation
+    {
+        private ComposeState _state = new([], "", 0, 4000, false, false, default);
+        private int _nextHwnd = 200;
+
+        public (ActionStatus Status, IntPtr ComposeWindow) EnsureEmptyNewComposeWindow()
+        {
+            _state = new([], "", 0, 4000, false, false, default);
+            return (ActionStatus.Ok, new IntPtr(++_nextHwnd));
+        }
+
+        public ComposeState? ReadCompose(IntPtr compose) => _state;
+
+        public SearchOutcome SearchRecipient(IntPtr compose, string name)
+        {
+            var rows = people
+                .Where(p => p.Name == name)
+                .Select(p => new PersonRow(p.Name, p.Title, [string.Join(" / ", p.Organization)], new AccNode(AccNode.ListItem, p.Name, "", 0, [])))
+                .ToList();
+            return new SearchOutcome(ActionStatus.Ok, new IntPtr(901), rows);
+        }
+
+        public ActionStatus AddRecipient(IntPtr compose, IntPtr search, PersonRow person)
+        {
+            _state = _state with { Recipients = [.. _state.Recipients, person.Name] };
+            return ActionStatus.Ok;
+        }
+
+        public void CloseUserSearchWindow(IntPtr search) { }
+
+        public ApplyResult ApplyBody(IntPtr compose, string body, string? expectedCurrentBody)
+        {
+            var normalized = body.Replace("\r\n", "\n");
+            _state = _state with { Body = normalized, UsedBytes = NoteBytes.Count(normalized) };
+            return new ApplyResult(ApplyStatus.Applied, _state);
+        }
+
+        public ActionStatus SetReservation(IntPtr compose, DateTime when)
+        {
+            _state = _state with { Reservation = when };
+            return ActionStatus.Ok;
+        }
+
+        public SendOutcome Send(IntPtr compose, ExpectedCompose expected) =>
+            ComposeActions.Difference(_state, expected) is { } diff
+                ? new SendOutcome(SendStatus.Mismatch, diff)
+                : new SendOutcome(SendStatus.WindowClosed, "");
+    }
+
     private static void Set(object target, string field, object value) => target.GetType().GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(target, value);
+    private static IEnumerable<Button> Buttons(object root)
+    {
+        if (root is Button button) yield return button;
+        if (root is not DependencyObject node) yield break;
+        foreach (var child in LogicalTreeHelper.GetChildren(node))
+            foreach (var found in Buttons(child)) yield return found;
+    }
+
     private static object Get(object target, string field) => target.GetType().GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(target)!;
     private static object? GetNullable(object target, string field) => target.GetType().GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(target);
     private static void Invoke(object target, string method, params object[] values) => target.GetType().GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(target, values);

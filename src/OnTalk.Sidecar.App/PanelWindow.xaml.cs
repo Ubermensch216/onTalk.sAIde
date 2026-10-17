@@ -62,6 +62,7 @@ public partial class PanelWindow : Window
     private TasksWindow? _tasksWindow;
     private SearchWindow? _searchWindow;
     private ComposeWindow? _composeWindow;
+    private PersonalizedWindow? _personalizedWindow;
     private ManageWindow? _manageWindow;
     private string? _onTalkVersion;
     private bool _embedding;
@@ -154,6 +155,13 @@ public partial class PanelWindow : Window
 
     private void Apply(WatchSnapshot snapshot, string? candidate)
     {
+        if (snapshot.OnTalkRunning && candidate is null && _store is not null &&
+            !snapshot.Contexts.Any(c => c.Context.Surface == OnTalkSurface.Login))
+        {
+            // 저장소 파일을 잠깐 못 본 것만으로 기존 계정과 화면을 해제하지 않는다.
+            // 다른 계정, 로그인 화면, 프로세스 종료는 아래에서 즉시 반영한다.
+            return;
+        }
         _latestSnapshot = snapshot;
         UpdateAccount(candidate);
 
@@ -269,6 +277,8 @@ public partial class PanelWindow : Window
         _tasksWindow?.Close();
         _searchWindow?.Close();
         _composeWindow?.Close();
+        _personalizedWindow?.Close();
+        _personalizedWindow = null;
         foreach (var pane in _composePanes.Values) pane.Dispose();
         _composePanes.Clear();
         _activePane = null;
@@ -758,10 +768,24 @@ public partial class PanelWindow : Window
         else OpenCompose(null);
     }
 
-    private void OpenCompose(StoredNote? source, ComposeTarget? target = null, ContactPreparation? preparation = null)
+    private void OpenCompose(StoredNote? source, ComposeTarget? target = null, ContactPreparation? preparation = null, bool personalize = false)
     {
         if (_store is null)
         {
+            return;
+        }
+        if (personalize && preparation is not null)
+        {
+            _personalizedWindow?.Close();
+            _personalizedWindow = new PersonalizedWindow(_store, preparation.People, "") { Owner = this };
+            _personalizedWindow.Closed += (s, _) =>
+            {
+                if (ReferenceEquals(s, _personalizedWindow))
+                {
+                    _personalizedWindow = null;
+                }
+            };
+            ShowWorkWindow(_personalizedWindow);
             return;
         }
         // 초안 창은 하나만 둔다. 닫을 때 쓰던 초안이 저장된다.
@@ -769,7 +793,7 @@ public partial class PanelWindow : Window
         var pane = target is not null ? _activePane : null;
         pane?.SetActive(false);
         if (pane is not null) pane.IsEnabled = false;
-        var window = _composeWindow = new ComposeWindow(_store, _writer, source, target, pane?.Draft, preparation) { Owner = this };
+        var window = _composeWindow = new ComposeWindow(_store, _writer, source, target, pane?.Draft, preparation, personalize) { Owner = this };
         _composeWindow.Closed += (s, _) =>
         {
             if (ReferenceEquals(s, _composeWindow))

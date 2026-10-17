@@ -19,11 +19,35 @@ internal enum FocusOutcome
 /// </summary>
 internal static class InputInjector
 {
-    public const ushort KeyA = 0x41, KeyV = 0x56, KeyDelete = 0x2E, KeyEnter = 0x0D;
+    public const ushort KeyA = 0x41, KeyV = 0x56, KeyDelete = 0x2E, KeyEnter = 0x0D, KeyEscape = 0x1B;
     private const ushort KeyControl = 0x11;
 
     /// <summary>입력창 가운데를 한 번 클릭해 대상 창을 앞으로 가져오고 입력창에 포커스를 준다. 마우스 위치는 되돌린다.</summary>
-    public static FocusOutcome FocusByClick(IntPtr hwnd, AccBounds bounds)
+    public static FocusOutcome FocusByClick(IntPtr hwnd, AccBounds bounds) => ClickAt(hwnd, bounds, right: false);
+
+    /// <summary>요소 가운데를 우클릭해 온톡의 메뉴를 띄운다. 마우스 위치는 되돌린다.</summary>
+    public static FocusOutcome RightClick(IntPtr hwnd, AccBounds bounds) => ClickAt(hwnd, bounds, right: true);
+
+    /// <summary>
+    /// 온톡의 우클릭 메뉴 같은 별도 팝업 창의 항목 가운데를 클릭한다. 팝업에는 웹 화면 자식 창이 없고 항목이 클릭 동작을
+    /// 알리지 않아 좌표로 누른다. 그 자리에 팝업 창이 실제로 있을 때만 누르고, 마우스 위치는 되돌린다.
+    /// </summary>
+    public static bool ClickPopupItem(IntPtr popup, AccBounds bounds)
+    {
+        if (bounds.IsEmpty || AnyModifierDown()) return false;
+        var (x, y) = bounds.Center;
+        var point = new Point { X = x, Y = y };
+        if (WindowFromPoint(point) != popup) return false;
+        GetCursorPos(out var cursor);
+        SetCursorPos(point.X, point.Y);
+        Mouse(MouseLeftDown);
+        Mouse(MouseLeftUp);
+        Thread.Sleep(350);
+        SetCursorPos(cursor.X, cursor.Y);
+        return true;
+    }
+
+    private static FocusOutcome ClickAt(IntPtr hwnd, AccBounds bounds, bool right)
     {
         if (AnyModifierDown())
         {
@@ -50,8 +74,8 @@ internal static class InputInjector
         }
         GetCursorPos(out var cursor);
         SetCursorPos(point.X, point.Y);
-        Mouse(MouseLeftDown);
-        Mouse(MouseLeftUp);
+        Mouse(right ? MouseRightDown : MouseLeftDown);
+        Mouse(right ? MouseRightUp : MouseLeftUp);
         Thread.Sleep(350);
         SetCursorPos(cursor.X, cursor.Y);
         return Win32.GetForegroundWindow() == hwnd ? FocusOutcome.Focused : FocusOutcome.NotForeground;
@@ -120,7 +144,7 @@ internal static class InputInjector
         SendInput(1, [input], Marshal.SizeOf<Input>());
     }
 
-    private const uint KeyUp = 0x0002, MouseLeftDown = 0x0002, MouseLeftUp = 0x0004;
+    private const uint KeyUp = 0x0002, MouseLeftDown = 0x0002, MouseLeftUp = 0x0004, MouseRightDown = 0x0008, MouseRightUp = 0x0010;
     private const uint SwpNoSize = 0x0001, SwpNoMove = 0x0002, SwpNoActivate = 0x0010;
 
     [StructLayout(LayoutKind.Sequential)]

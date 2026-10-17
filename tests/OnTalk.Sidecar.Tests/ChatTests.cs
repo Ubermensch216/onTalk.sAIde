@@ -146,23 +146,6 @@ public sealed class ChatTests
         Assert.Contains("인사말이나 서명을 자동으로 붙이지 않는다", handler.Request); Assert.DoesNotContain("인사말로 시작", handler.Request);
     }
 
-    [Fact]
-    public async Task 자연어_검색어는_제안만_반환한다()
-    {
-        using var handler = new FakeHandler("[\"출장\",\"여비\"]"); using var writer = new OllamaWriter(handler: handler);
-        Assert.Equal(new[] { "출장", "여비" }, await writer.SuggestContactTermsAsync("출장 여비 담당자는 누구인가요?", CancellationToken.None));
-        Assert.Contains("사람이나 담당 부서를 추정하지 않는다", handler.Request);
-    }
-    [Theory]
-    [InlineData("[]")]
-    [InlineData("담당자는 예시입니다")]
-    [InlineData("[\"\"]")]
-    public async Task 잘못된_검색어_응답은_후보_검색에_사용하지_않는다(string reply)
-    {
-        using var handler = new FakeHandler(reply); using var writer = new OllamaWriter(handler: handler);
-        await Assert.ThrowsAsync<AnalysisUnavailableException>(() => writer.SuggestContactTermsAsync("담당자?", CancellationToken.None));
-    }
-
     private sealed class FakeHandler(string reply) : HttpMessageHandler
     {
         public string Request { get; private set; } = "";

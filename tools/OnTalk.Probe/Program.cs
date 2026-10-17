@@ -26,6 +26,7 @@ using OnTalk.Sidecar.Storage;
 //   group --hwnd 0x.. --name 이름 --title 직급   그 사람 한 명짜리 그룹을 수신자로 넣는 흐름 시험 (전송 없음)
 //   backupcheck                     실제 보관 자료를 백업해 임시 폴더에 되살려 보고 건수를 비교한다 (원본은 건드리지 않음)
 //   prepare --hwnd 0x.. --text T --at "yyyy-MM-dd HH:mm"   본문과 예약을 넣어 전송 직전 상태로 만든다 (전송 없음)
+//   orgsel --hwnd 0x..            조직도에서 읽은 사람 수와 체크한 사람 수 (이름 미출력)
 //   setvalue --hwnd 0x.. --path P --text T   접근성 기능으로 입력창 값을 바꾸는 실험 (창을 앞으로 가져오지 않음)
 //   input --hwnd 0x..               빈 새 쪽지 창에 붙여넣기 시험 (사용자 허락 후에만 실행)
 // input 명령을 빼면 입력·클릭 등 온톡을 조작하는 동작은 하지 않는다.
@@ -161,6 +162,15 @@ if (command == "people")
         Console.WriteLine($"   직급 {row.Title.Length}자, 세부 {row.Details.Count}칸");
     }
     Console.WriteLine($"서로 구분됨: {found.Rows.Select(r => (r.Title, string.Join("|", r.Details))).Distinct().Count() == found.Rows.Count}");
+    return 0;
+}
+if (command == "orgsel")
+{
+    // 조직도에서 읽은 사람 수와 체크한 사람 수만 출력한다. 이름은 출력하지 않는다.
+    var target = new IntPtr(Convert.ToInt64(hwndArg!, 16));
+    var tree = MsaaReader.ReadTree(Win32.FindRenderChild(target) ?? IntPtr.Zero, readEditableValues: false, readContentText: true);
+    var snapshot = tree is null ? null : MainPeopleParser.Parse(tree, OnTalk.Sidecar.Core.MainMenu.Organization, DateTimeOffset.Now);
+    Console.WriteLine(snapshot is null ? "트리를 읽지 못했습니다." : $"읽은 사람 {snapshot.People.Count}명 · 체크 {snapshot.SelectedKeys.Count}명 · 일부 목록 {snapshot.Truncated}");
     return 0;
 }
 if (command == "setvalue")
@@ -417,6 +427,75 @@ switch (command)
         sta.Start();
         sta.Join();
         return code;
+    }
+    case "friends":
+    {
+        // 친구/조직도 화면을 파서로 읽어 개수만 출력한다. 이름은 출력하지 않는다.
+        foreach (var w in Selected())
+        {
+            if (Win32.FindRenderChild(w.Hwnd) is not { } render || MsaaReader.ReadTree(render) is not { } tree) continue;
+            var menu = WindowContextParser.Parse(tree).Menu;
+            var snap = MainPeopleParser.Parse(tree, menu, DateTimeOffset.Now);
+            Console.WriteLine($"0x{w.Hwnd.ToInt64():X8} {menu}: 사람 {snap.People.Count}, 선택 {snap.SelectedKeys.Count}, 그룹 {snap.Scopes.Count}" +
+                $" [{string.Join(", ", snap.Scopes.Select(s => $"{s.Name.Length}자:{s.MemberKeys.Count}명{(s.Selected ? "✓" : "")}"))}]");
+        }
+        return 0;
+    }
+    case "groupnote":
+        // 체크한 친구로 단체 쪽지 작성 창을 연다. 아무것도 보내지 않는다.
+        Console.WriteLine(FriendActions.OpenGroup(GroupOpenKind.Note));
+        return 0;
+    case "ctxmenu":
+    {
+        // 체크한 친구 한 명을 우클릭하고 그때 보이는 최상위 창을 나열한 뒤 Esc로 닫는다.
+        if (FriendActions.FindFriendsWindow() is not { } main) { Console.WriteLine("친구 화면 없음"); return 1; }
+        var tree = MsaaReader.ReadTree(main.Render)!;
+        var snap = MainPeopleParser.Parse(tree, OnTalk.Sidecar.Core.MainMenu.Friends, DateTimeOffset.Now);
+        var row = snap.SelectedKeys.Select(k => tree.DescendantsAndSelf().FirstOrDefault(n => n.Path == k)).FirstOrDefault(n => n is { Bounds.IsEmpty: false });
+        if (row is null) { Console.WriteLine("체크한 행 없음"); return 1; }
+        var before = new HashSet<IntPtr>();
+        Native.EnumWindows((h, _) => { if (Native.IsWindowVisible(h)) before.Add(h); return true; }, IntPtr.Zero);
+        Console.WriteLine("RightClick: " + InputInjector.RightClick(main.Hwnd, row.Bounds));
+        Thread.Sleep(900);
+        Native.EnumWindows((h, _) =>
+        {
+            if (!Native.IsWindowVisible(h)) return true;
+            Native.GetWindowRect(h, out var r);
+            Native.GetWindowThreadProcessId(h, out var pid);
+            if (before.Contains(h) && r.Width * r.Height > 0 && r.Width < 400 && false) return true;
+            Console.WriteLine($"{(before.Contains(h) ? "  " : "NEW")} 0x{h.ToInt64():X8} pid={pid} {Native.ClassName(h)} {r.Width}x{r.Height} @{r.Left},{r.Top}");
+            return true;
+        }, IntPtr.Zero);
+        Native.EnumWindows((h, _) =>
+        {
+            if (before.Contains(h) || !Native.IsWindowVisible(h) || !Native.ClassName(h).StartsWith("Chrome_WidgetWin")) return true;
+            Native.EnumChildWindows(h, (c, _) => { Native.GetWindowRect(c, out var cr); Console.WriteLine($"  자식 0x{c.ToInt64():X8} {Native.ClassName(c)} {cr.Width}x{cr.Height}"); return true; }, IntPtr.Zero);
+            var iid = typeof(Accessibility.IAccessible).GUID;
+            foreach (var target in new[] { h }.Concat(Enumerable.Empty<IntPtr>()))
+            {
+                var hr = Win32.AccessibleObjectFromWindow(target, Win32.OBJID_CLIENT, ref iid, out var obj);
+                Console.WriteLine($"  MSAA hr={hr} obj={(obj as Accessibility.IAccessible)?.accChildCount}");
+                if (obj is Accessibility.IAccessible acc)
+                {
+                    Win32.ActivateAccessibility(target); Thread.Sleep(300);
+                    var t = MsaaReader.ReadTree(target);
+                    Console.WriteLine($"  ReadTree(popup) = {(t is null ? "null" : t.DescendantsAndSelf().Count() + "노드")}");
+                    if (t is not null) foreach (var n in t.DescendantsAndSelf()) Console.WriteLine($"    {n.Role} \"{n.Name}\" act={n.HasAction} {n.Bounds}");
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+        foreach (var (ph, pr) in Win32.VisibleOnTalkWindows().Where(w => !before.Contains(w.Hwnd)))
+        {
+            Win32.ActivateAccessibility(pr);
+            Console.WriteLine($"팝업 0x{ph.ToInt64():X8}");
+            if (MsaaReader.ReadTree(pr) is { } pt)
+                foreach (var n in pt.DescendantsAndSelf()) Console.WriteLine($"   {n.Role} \"{(n.Role == "statictext" || n.Name.Length < 12 ? n.Name : "…")}\" s={n.State:X} act={n.HasAction} {n.Bounds}");
+        }
+        var tree2 = MsaaReader.ReadTree(main.Render)!;
+        Console.WriteLine("트리에 단체 대화 요소: " + tree2.DescendantsAndSelf().Count(n => n.Name.Contains("단체")) + ", 5자 글자 " + tree2.DescendantsAndSelf().Count(n => n.Role == "statictext" && n.Name.Length == 5));
+        InputInjector.Tap(main.Hwnd, InputInjector.KeyEscape);
+        return 0;
     }
     case "tree":
         if (hwndArg is null)

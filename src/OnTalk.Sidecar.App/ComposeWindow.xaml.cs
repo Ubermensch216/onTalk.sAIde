@@ -51,7 +51,7 @@ public partial class ComposeWindow : Window
     private readonly Stack<(string Message, string Quote, bool IncludeQuote)> _history = [];
 
     public ComposeWindow(ProfileStore store, OllamaWriter writer, StoredNote? source, ComposeTarget? target = null,
-        string? initialText = null, ContactPreparation? preparation = null)
+        string? initialText = null, ContactPreparation? preparation = null, bool personalize = false)
     {
         InitializeComponent();
         _store = store;
@@ -62,13 +62,15 @@ public partial class ComposeWindow : Window
         SourceText.Text = target is not null ? SidecarPolicy.ComposeTitle(target.Kind) : source is null
             ? "새 쪽지 초안"
             : $"답장 초안 · {source.Note.SenderName} ({source.Note.SentAt?.Value.ToString("yyyy-MM-dd") ?? source.Note.SentAtText})";
-        Editor.Text = initialText ?? store.GetDraft(_slot) ?? preparation?.InitialDraft ?? "";
+        Editor.Text = initialText ?? store.GetDraft(_slot) ?? "";
         ReloadTemplates();
         RecentDrafts.ItemsSource = store.GetDrafts().Where(d => d.Slot != _slot).Select(d => new DraftChoice(d)).ToList();
         InitializeDispatchControls();
         if (preparation is not null)
         {
-            SourceText.Text = $"{preparation.Purpose} · 연락 후보 {preparation.People.Count}명";
+            _preparedPeople = preparation.People.ToList();
+            SourceText.Text = $"조직도 선택 직원 {preparation.People.Count}명에게 쪽지";
+            if (personalize) Loaded += (_, _) => OnPersonalize(this, new RoutedEventArgs());
             PreparedContacts.Visibility = Visibility.Visible;
             PreparedNotice.Text = $"{preparation.Source}\n{preparation.ObservedAt.ToLocalTime():yyyy-MM-dd HH:mm} 당시 정보\n{ContactSupport.IdentityWarning(preparation.People)}";
             PreparedPerson.ItemsSource = preparation.People;
@@ -217,7 +219,9 @@ public partial class ComposeWindow : Window
     {
         var hwnd = _target;
         var session = _targetSession;
-        if (hwnd == IntPtr.Zero || _closed) return false;
+        if (hwnd == IntPtr.Zero || _closed || _busy) return false;
+        if (_activeItem is not null && !CheckPersonalizedTarget(await Task.Run(() => ComposeWriter.Read(hwnd)))) return false;
+        if (_closed || _busy || hwnd != _target || session != _targetSession) return false;
         _busy = true;
         EnableControls();
         Result("온톡 창에 반영하는 중", ok: true);

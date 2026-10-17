@@ -120,14 +120,14 @@ public partial class PanelWindow
         }
         if (context.Surface == OnTalkSurface.Main && context.Menu == MainMenu.Friends)
         {
-            _homePane ??= new HomePane(_store, OpenContactCandidate, () => OnOpenTasks(this, new RoutedEventArgs()));
+            _homePane ??= new HomePane(_store, () => OnOpenTasks(this, new RoutedEventArgs()));
             _homePane.Refresh(current.People ?? new PeopleSnapshot(MainMenu.Friends, [], [], [], DateTimeOffset.Now));
             _homePane.SetActive(true);
             PeopleHost.Content = _homePane;
             EmptyState.Visibility = NoteView.Visibility = ComposeHost.Visibility = ChatHost.Visibility = ContextView.Visibility = Visibility.Collapsed;
             PeopleHost.Visibility = Visibility.Visible;
             ContextHeader.Visibility = Visibility.Collapsed;
-            ContextHint.Text = "친구·그룹별로 이어보는 업무 소통";
+            ContextHint.Text = "그룹별 쪽지 발송 이력과 대화 요약";
             return;
         }
         if (context.Surface == OnTalkSurface.Main && context.Menu == MainMenu.Organization)
@@ -135,8 +135,7 @@ public partial class PanelWindow
             if (_peoplePane is null || _peoplePaneKey != key)
             {
                 _peoplePane?.Dispose();
-                _peoplePane = new PeoplePane(_store, context.Menu,
-                    preparation => OpenCompose(null, preparation: preparation), OpenContactCandidate, _writer);
+                _peoplePane = new PeoplePane((preparation, personalize) => OpenCompose(null, preparation: preparation, personalize: personalize));
                 _peoplePaneKey = key;
             }
             _peoplePane.Refresh(current.People ?? new PeopleSnapshot(context.Menu, [], [], [], DateTimeOffset.Now));
@@ -153,16 +152,9 @@ public partial class PanelWindow
         ContextPurpose.Text = guide.Purpose;
         ContextTools.Text = guide.Tools;
         ContextScope.Text = guide.Scope;
-        LocalGroupsPanel.Visibility = context.Surface == OnTalkSurface.Main && context.Menu == MainMenu.Friends
-            ? Visibility.Visible : Visibility.Collapsed;
-        if (changed && LocalGroupsPanel.Visibility == Visibility.Visible)
-        {
-            ContextGroups.ItemsSource = _store.GetGroups().Select(g => new GroupItem(g)).ToList();
-            ContextMembers.Text = "그룹을 고르면 이름·직급·소속을 확인할 수 있습니다.";
-        }
-        var canPrepare = context.Surface == OnTalkSurface.Main && context.Menu is MainMenu.Friends or MainMenu.Organization or MainMenu.Notes;
+        var canPrepare = context.Surface == OnTalkSurface.Main && context.Menu == MainMenu.Notes;
         ContextPrimary.Visibility = canPrepare ? Visibility.Visible : Visibility.Collapsed;
-        ContextPrimary.Content = context.Menu == MainMenu.Organization ? "문의 쪽지 준비" : "새 쪽지 준비";
+        ContextPrimary.Content = "새 쪽지 준비";
         ContextSearch.Visibility = context.Surface == OnTalkSurface.Main ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -175,17 +167,5 @@ public partial class PanelWindow
         if (_latestSnapshot is { } latest) ApplyCurrentContext(latest);
     }
 
-    private void OnContextGroupChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (ContextGroups.SelectedItem is GroupItem item)
-            ContextMembers.Text = string.Join("\n", item.Group.Members.Select(m => $"{m.Name} · {m.Title}\n{string.Join(" · ", m.Details)}"));
-    }
-
     private void OnContextPrimary(object sender, RoutedEventArgs e) => OpenCompose(null);
-
-    private void OpenContactCandidate(StoredNote note)
-    {
-        OnOpenSearch(this, new RoutedEventArgs());
-        _searchWindow?.ShowContactCandidate(note);
-    }
 }

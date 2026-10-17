@@ -16,6 +16,84 @@ public class MainPeopleTests
     private static AccNode Department(string key, string name, params AccNode[] children) => new("outlineitem", name, "", 0,
         [Text(name), .. children]) { Path = key };
 
+    [Fact]
+    public void 조직도에서_체크한_직원과_부서를_선택으로_읽는다()
+    {
+        static AccNode Checked(string path, bool on) => new(AccNode.CheckBox, "", "", on ? AccNode.StateChecked : 0, []) { Path = path };
+        var employeeA = Employee("a", "체크한 직원") with { Children = [Checked("a/c", true), Text("체크한 직원"), Text("주무관"), Text("오프라인")] };
+        var employeeB = Employee("b", "체크 안 한 직원") with { Children = [Checked("b/c", false), Text("체크 안 한 직원"), Text("주무관"), Text("오프라인")] };
+        var dept = Department("d", "회계과", Employee("c", "부서 직원")) with { Children = [Checked("d/c", true), Text("회계과"), Employee("c", "부서 직원")] };
+        var snapshot = MainPeopleParser.Parse(MainTree("/organizations", Department("i", "예시기관", employeeA, employeeB, dept)), MainMenu.Organization, Now);
+        Assert.Equal(new[] { "a", "c" }, snapshot.SelectedKeys.Order());
+    }
+
+    [Fact]
+    public void 친구_목록에서_체크한_친구와_그룹을_선택으로_읽는다()
+    {
+        static AccNode Box(string path, bool on) => new("SPAN", "", "", 0, []) { Path = path, Class = on ? "ant-checkbox ant-checkbox-checked" : "ant-checkbox" };
+        AccNode Friend(string key, string name, bool on) => Person(key, name) with { Children = [Box(key + "/c", on), Text(name), Text("주무관"), Text("예시시 | 총무과"), Text("온라인")] };
+        var groupA = Div(Div(new AccNode(AccNode.CheckBox, "", "", 0, []) { Path = "ga" }, Text("그룹 A"), Text("2")),
+            Div(Friend("a", "체크한 친구", true), Friend("b", "체크 안 한 친구", false)));
+        var groupB = Div(Div(new AccNode(AccNode.CheckBox, "", "", AccNode.StateChecked, []) { Path = "gb" }, Text("그룹 B"), Text("1")),
+            Div(Friend("c", "그룹으로 체크", false)));
+        var snapshot = MainPeopleParser.Parse(MainTree("/main/1", groupA, groupB), MainMenu.Friends, Now);
+        Assert.Equal(new[] { "a", "c" }, snapshot.SelectedKeys.Order());
+        Assert.Equal(new[] { "a", "b" }, snapshot.Scopes.Single(s => s.Name == "그룹 A").MemberKeys);
+        Assert.False(snapshot.Scopes.Single(s => s.Name == "그룹 A").Selected);
+    }
+
+    [Fact]
+    public void 온톡_5_4_9_친구_목록은_평평한_구조와_체크_표시_요소로_선택을_읽는다()
+    {
+        static AccNode Header(string path, string name, int state) => Div(Div(new AccNode(AccNode.CheckBox, "", "", state, []) { Path = path }, Text(name), Text("2")));
+        AccNode Friend(string key, string name, bool on)
+        {
+            var photo = new AccNode("DIV", "", "", 0, [new("SPAN", "", "", 0, [])]) { HasAction = true, Bounds = new(0, 0, 36, 36) };
+            var list = new AccNode("list", "", "", 0, [Person(key, name)]);
+            AccNode[] kids = on
+                ? [new("DIV", "", "", 0, []) { HasAction = true, Bounds = new(0, 0, 50, 44) }, photo, list]
+                : [photo, list];
+            return new AccNode("DIV", "", "", 0, kids);
+        }
+        var root = MainTree("/main/1", Div(Header("g1", "그룹 A", 0x100000), Friend("a", "체크한 친구", true), Friend("b", "친구 B", false),
+            Header("g2", "그룹 B", 0x100000), Friend("c", "친구 C", false), Friend("d", "체크한 친구 D", true)));
+        var snapshot = MainPeopleParser.Parse(root, MainMenu.Friends, Now);
+        Assert.Equal(new[] { "a", "d" }, snapshot.SelectedKeys.Order());
+        Assert.Equal(new[] { "a", "b" }, snapshot.Scopes.Single(s => s.Name == "그룹 A").MemberKeys);
+        Assert.Equal(new[] { "c", "d" }, snapshot.Scopes.Single(s => s.Name == "그룹 B").MemberKeys);
+        Assert.All(snapshot.Scopes, s => Assert.False(s.Selected));
+        var all = MainPeopleParser.Parse(MainTree("/main/1", Div(Header("g1", "그룹 A", 0x100000), Friend("a", "체크한 친구", true), Friend("b", "체크한 친구 B", true))), MainMenu.Friends, Now);
+        Assert.True(Assert.Single(all.Scopes).Selected);
+    }
+
+    [Fact]
+    public void 우클릭_메뉴에서_단체_대화와_단체_쪽지_항목을_찾는다()
+    {
+        static AccNode Item(string label, string path) => new("listitem", "", "", 0, [Text(label)]) { Path = path, Bounds = new(10, 10, 80, 20) };
+        var menu = Div(Item("단체 대화", "m/0"), Item("단체 쪽지", "m/1"), Item("선택 취소", "m/2"));
+        Assert.Equal("m/0", FriendActions.MenuItem(menu, ["단체 대화"])!.Path);
+        Assert.Equal("m/1", FriendActions.MenuItem(menu, ["단체 쪽지", "단체쪽지"])!.Path);
+        Assert.Null(FriendActions.MenuItem(Div(Item("영상회의", "m/3") with { Bounds = default }), ["영상회의"]));
+    }
+
+    [Fact]
+    public void 실제_조직도처럼_확인란_CSS_클래스로만_체크를_알려도_선택으로_읽는다()
+    {
+        // 온톡 5.4.9: 확인란은 SPAN이며 MSAA 상태는 체크와 무관하고 class에 ant-tree-checkbox-checked가 붙는다.
+        static AccNode Box(string path, bool on) => new("SPAN", "", "", 0, [new("table", "", "", 0x10000, [])]) { Path = path, Class = on ? "ant-tree-checkbox ant-tree-checkbox-checked" : "ant-tree-checkbox" };
+        AccNode Row(string key, string name, bool on) => new("outlineitem", name, "", 0x200000, [Box(key + "/c", on), Text(name), Text("지방행정주사/주무관"), Text("오프라인")]) { Path = key };
+        var dept = new AccNode("outlineitem", "icon: caret-down 감사담당관", "", 0x200000, [Box("d/c", false), Text("감사담당관"), Row("a", "직원 A", true), Row("b", "직원 B", false)]) { Path = "d" };
+        var snapshot = MainPeopleParser.Parse(MainTree("/organizations", dept), MainMenu.Organization, Now);
+        Assert.Equal("a", Assert.Single(snapshot.SelectedKeys));
+        Assert.Equal("직원 A", snapshot.People.Single(p => p.Key == "a").Name);
+    }
+
+    [Theory]
+    [InlineData("display:block;tag:span;class:ant-tree-checkbox ant-tree-checkbox-checked;", "ant-tree-checkbox ant-tree-checkbox-checked")]
+    [InlineData(@"display:table;tag:<pseudo\:after>;layout-guess:true;", "")]
+    [InlineData(@"class:a\;b;tag:span", "a;b")]
+    public void IA2_특성에서_class만_꺼낸다(string attributes, string expected) => Assert.Equal(expected, MsaaReader.ParseClass(attributes));
+
     [Theory]
     [InlineData("/main/1", MainMenu.Friends)]
     [InlineData("/organizations", MainMenu.Organization)]
@@ -105,16 +183,6 @@ public class MainPeopleTests
     }
 
     [Fact]
-    public void 후보는_확인한_글자와_근거가_일치할_때만_찾는다()
-    {
-        var person = new ContactPerson("A", "담당자", "주무관", ["총무과"], Duty: "출장 여비 정산");
-        var match = Assert.Single(ContactSupport.Find([person], "총무과 여비"));
-        Assert.Contains("담당업무 글자 일치", match.Evidence); Assert.Contains("소속 글자 일치", match.Evidence);
-        Assert.Empty(ContactSupport.Find([person with { Duty = "" }], "여비"));
-        Assert.Empty(ContactSupport.Find([person], "인사"));
-    }
-
-    [Fact]
     public void 온라인_상태나_상세_변화는_선택을_유지하고_사람이_교체되면_유지하지_않는다()
     {
         var person = new ContactPerson("A", "담당자", "주무관", ["총무과"]);
@@ -128,7 +196,7 @@ public sealed class ContactStoreTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ontalk-saide-tests", Guid.NewGuid().ToString("N"));
     [Fact]
-    public void 버전6_자료를_보존하고_백업을_남긴_뒤_연락그룹_구조를_추가한다()
+    public void 버전6_자료를_보존하고_백업을_남긴_뒤_저장소_구조를_올린다()
     {
         var at = DateTimeOffset.Now;
         using (var store = ProfileStore.Open(_root, "migration"))
@@ -138,42 +206,12 @@ public sealed class ContactStoreTests : IDisposable
             // 합성 DB를 실제 이전 스키마 상태로 만든다. 운영 계정의 저장소는 사용하지 않는다.
             var db = (Microsoft.Data.Sqlite.SqliteConnection)typeof(ProfileStore).GetField("_db", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(store)!;
             using var cmd = db.CreateCommand();
-            cmd.CommandText = "DROP TABLE home_chat_contact; DROP TABLE home_chat; DROP TABLE home_people; DROP TABLE contact_preparation_group; DROP TABLE task_chat_source; DROP TABLE contact_note_link; PRAGMA user_version=6;";
+            cmd.CommandText = "DROP TABLE personalized_work; DROP TABLE home_chat_contact; DROP TABLE home_chat; DROP TABLE home_people; DROP TABLE contact_preparation_group; DROP TABLE task_chat_source; DROP TABLE contact_note_link; PRAGMA user_version=6;";
             cmd.ExecuteNonQuery();
         }
         using var reopened = ProfileStore.Open(_root, "migration");
-        Assert.Equal(1, reopened.CountNotes()); Assert.Single(reopened.GetGroups()); Assert.Empty(reopened.GetContactGroups());
+        Assert.Equal(1, reopened.CountNotes()); Assert.Single(reopened.GetGroups()); Assert.Empty(reopened.GetPersonalizedWorks());
         Assert.True(File.Exists(Path.Combine(_root, "migration", "notes.db.v6.bak")));
-        reopened.SaveContactGroup("새 연락 후보", new ContactPreparation("문의", [new ContactPerson("1", "예시", "주무관", ["총무과"])], "합성", at), at);
-        Assert.Single(reopened.GetContactGroups());
-    }
-    [Fact]
-    public void 연락_후보_그룹은_재시작_후_복원되고_기존_수신자_그룹과_계정에_격리된다()
-    {
-        var at = DateTimeOffset.Now;
-        var person = new ContactPerson("screen:1", "예시 담당자", "주무관", ["총무과"], Duty: "여비 정산") { DetailsObservedAt = at };
-        var prep = new ContactPreparation("문의", [person], "사이드카 직접 선택", at);
-        using (var store = ProfileStore.Open(_root, "A"))
-        {
-            store.SaveContactGroup("연락 준비", prep, at);
-            Assert.Empty(store.GetGroups());
-            store.SaveContactGroup("연락 준비", prep with { People = [person with { Name = "바뀐 후보" }] }, at.AddMinutes(1));
-        }
-        using var reopened = ProfileStore.Open(_root, "A");
-        var group = Assert.Single(reopened.GetContactGroups());
-        Assert.Equal("바뀐 후보", Assert.Single(group.People).Name); Assert.Equal(at, group.People[0].DetailsObservedAt);
-        using var other = ProfileStore.Open(_root, "B"); Assert.Empty(other.GetContactGroups());
-        reopened.DeleteContactGroup(group.Id); Assert.Empty(reopened.GetContactGroups());
-    }
-
-    [Fact]
-    public void 보관_후보는_본문의_이름_언급이_아닌_정확한_발신자_이름으로_찾는다()
-    {
-        using var store = ProfileStore.Open(_root, "A"); var at = DateTimeOffset.Now;
-        store.SaveReceived(new ReceivedNote("예시 담당자", "다른 부서", "오늘", null, 1, "이름이 같아도 신원 미확인", []), at);
-        store.SaveReceived(new ReceivedNote("다른 발신자", "총무과", "오늘", null, 1, "예시 담당자를 언급", []), at);
-        Assert.Equal("다른 부서", Assert.Single(store.GetContactNoteCandidates("예시 담당자")).Note.SenderDetail);
-        Assert.Empty(store.GetContactNoteCandidates("예시"));
     }
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }

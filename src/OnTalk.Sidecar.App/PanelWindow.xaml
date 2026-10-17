@@ -169,13 +169,6 @@
                             <TextBlock x:Name="ContextTools" Style="{StaticResource Small}" Margin="0,10,0,0" />
                         </StackPanel>
                     </Border>
-                    <Border x:Name="LocalGroupsPanel" Style="{StaticResource Card}" Visibility="Collapsed">
-                        <StackPanel>
-                            <TextBlock Text="사이드카의 로컬 그룹" Style="{StaticResource SectionTitle}" />
-                            <ComboBox x:Name="ContextGroups" DisplayMemberPath="Label" SelectionChanged="OnContextGroupChanged" />
-                            <TextBlock x:Name="ContextMembers" Style="{StaticResource Small}" Margin="0,8,0,0" />
-                        </StackPanel>
-                    </Border>
                     <TextBlock x:Name="ContextScope" Style="{StaticResource Small}" Margin="2,4,2,12" />
                     <Button x:Name="ContextPrimary" Content="새 쪽지 준비" Style="{StaticResource PrimaryButton}" Click="OnContextPrimary" />
                     <Button x:Name="ContextSearch" Content="보관한 쪽지에서 찾기" Margin="0,8,0,0" Click="OnOpenSearch" />

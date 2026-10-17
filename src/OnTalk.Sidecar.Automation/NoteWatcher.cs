@@ -31,7 +31,10 @@ public sealed record WatchSnapshot(bool OnTalkRunning, IReadOnlyList<NoteWindow>
 public sealed class NoteWatcher : IDisposable
 {
     private const string ProcessName = "온톡";
-    private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(800);
+    // 이벤트를 받지 못할 때를 위한 안전 주기.
+    private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(400);
+    private static readonly TimeSpan MinEventGap = TimeSpan.FromMilliseconds(60);
+    private AccessibilityEventWaiter? _events;
 
     private readonly CancellationTokenSource _stop = new();
     private readonly Thread _thread;
@@ -55,22 +58,36 @@ public sealed class NoteWatcher : IDisposable
 
     private void Run()
     {
+        using var events = _events = new AccessibilityEventWaiter();
+        var clock = new Stopwatch();
         while (!_stop.IsCancellationRequested)
         {
             WatchSnapshot snapshot;
+            clock.Restart();
             try
             {
                 snapshot = Scan();
             }
             catch (Exception)
             {
-                // 읽는 도중 창이 닫히는 등의 일시 오류. 다음 주기에 다시 읽는다.
-                snapshot = new WatchSnapshot(true, []);
+                // 일시적인 스캔 오류를 계정 해제나 창 종료로 알리지 않는다.
+                if (!Pause(events, clock)) break;
+                continue;
             }
             if (_stop.IsCancellationRequested) break;
             Updated?.Invoke(snapshot);
-            _stop.Token.WaitHandle.WaitOne(Interval);
+            if (!Pause(events, clock)) break;
         }
+    }
+
+    /// <summary>
+    /// 온톡 화면이 바뀌었다는 접근성 이벤트가 오면 바로 다시 읽는다. 이벤트가 없어도 <see cref="Interval"/>마다 읽는다.
+    /// 이벤트가 몰려도 읽는 데 걸린 시간만큼은 쉬어서 온톡에 부담을 주지 않는다.
+    /// </summary>
+    private bool Pause(AccessibilityEventWaiter events, Stopwatch scan)
+    {
+        var minDelay = scan.Elapsed < MinEventGap ? MinEventGap : scan.Elapsed;
+        return events.Wait(_stop.Token.WaitHandle, Interval, minDelay);
     }
 
     private WatchSnapshot Scan()
@@ -80,6 +97,7 @@ public sealed class NoteWatcher : IDisposable
         {
             using (process) pids.Add((uint)process.Id);
         }
+        _events?.Track(pids);
         if (pids.Count == 0)
         {
             _activated.Clear();
@@ -88,7 +106,7 @@ public sealed class NoteWatcher : IDisposable
         }
 
         var account = OnTalkAccount.DetectCandidate();
-        if (_sessionAccount != account) { _sessions.Clear(); _sessionAccount = account; }
+        if (account is not null && _sessionAccount != account) { _sessions.Clear(); _sessionAccount = account; }
         var permitted = Volatile.Read(ref _permittedAccount);
         var readContent = permitted is not null && account == permitted;
         var target = Interlocked.CompareExchange(ref _target, IntPtr.Zero, IntPtr.Zero);
