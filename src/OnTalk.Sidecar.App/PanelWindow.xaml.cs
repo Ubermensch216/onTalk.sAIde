@@ -19,7 +19,7 @@ public partial class PanelWindow : Window
     private const double PanelWidthDip = 360;
     private const double PanelHeightDip = 640;
     private const double PanelMinHeightDip = 380;
-    private const double RailWidthDip = 44;
+    private const double RailWidthDip = 64;
     private const double RailHeightDip = 180;
     // 접힌 도구를 온톡 창 위에 겹쳐 놓을 때 온톡의 창 단추를 가리지 않도록 내려 놓는 거리.
     private const double RailOverlapInsetDip = 96;

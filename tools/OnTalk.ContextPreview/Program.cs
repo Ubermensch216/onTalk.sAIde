@@ -106,6 +106,15 @@ internal static class Program
                 throw new InvalidOperationException("Home·부서 선택 문맥이 표시되지 않았습니다.");
             Render((FrameworkElement)panel.Content,Path.Combine(output,name+".png"),360,800);
             Render((FrameworkElement)panel.Content,Path.Combine(output,name+"-short.png"),360,480);
+            if (name == "organization-person")
+            {
+                var statusText = (TextBlock)panel.FindName("StatusText");
+                var origStatus = statusText.Text;
+                statusText.Text = "연결됨 · 조직도";
+                Invoke(panel, "UpdateFooter");
+                Render((FrameworkElement)panel.Content, Path.Combine(output, "organization-panel-tall.png"), 400, 1421);
+                statusText.Text = origStatus;
+            }
         }
         ContactPreparation? prepared = null; var personalizeRequested = false;
         using var contacts = new PeoplePane((p, personalize) => { prepared = p; personalizeRequested = personalize; });

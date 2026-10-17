@@ -60,6 +60,9 @@ public sealed class PersonalizedWindow : Window
     private CancellationTokenSource? _batchCts;
     private PersonalizedWorkItem? _shown;
     private bool _closed;
+    private readonly StackPanel _savedBody = new();
+    private readonly TextBlock _savedChevron = new(), _savedCount = new();
+    private bool _savedExpanded;
     private readonly Dictionary<string, (TextBlock Count, ProgressBar Bar)> _headerCounters = [];
     private string _cleanSnapshot = "";
 
@@ -127,6 +130,7 @@ public sealed class PersonalizedWindow : Window
         Closing += (_, e) => { if (!_closed && !ConfirmLeave("개인별 쪽지 닫기", "닫습니다.")) e.Cancel = true; };
         Closed += (_, _) => { _batchCts?.Cancel(); _closed = true; };
         Load();
+        SetSavedExpanded(_saved.Items.Count > 0);   // 저장한 작업이 없으면 접어 둔다.
     }
 
     // ───────────────────────── 화면 구성 ─────────────────────────
@@ -288,6 +292,25 @@ public sealed class PersonalizedWindow : Window
             if (right is FrameworkElement fe) { fe.VerticalAlignment = VerticalAlignment.Top; fe.Margin = new Thickness(12, fe is Button ? 0 : 4, 0, 0); }
             Grid.SetColumn(right, 2); head.Children.Add(right);
         }
+        // 모든 구역은 접고 펼 수 있다(기본은 펼침). 오른쪽 화살표 단추나 제목 글을 누르면 바뀐다.
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var chevron = new Button
+        {
+            Content = "", Style = Res<Style>("IconButton"), Width = 28, Height = 28, FontSize = 11, ToolTip = "접기/펼치기",
+            Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top,
+        };
+        chevron.AutomationName(title + " 접기 또는 펼치기");
+        void Toggle()
+        {
+            var open = body.Visibility != Visibility.Visible;
+            body.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+            chevron.Content = open ? "" : "";
+            head.Margin = new Thickness(0, 0, 0, open ? 12 : 0);
+        }
+        chevron.Click += (_, _) => Toggle();
+        texts.Background = Brushes.Transparent; texts.Cursor = System.Windows.Input.Cursors.Hand;
+        texts.MouseLeftButtonUp += (_, _) => Toggle();
+        Grid.SetColumn(chevron, 3); head.Children.Add(chevron);
         var stack = new StackPanel();
         stack.Children.Add(head); stack.Children.Add(body);
         return new Border { Style = Res<Style>("Card"), Padding = new Thickness(18, 16, 18, 16), Margin = new Thickness(0, 0, 0, 12), Child = stack };
@@ -301,17 +324,30 @@ public sealed class PersonalizedWindow : Window
 
     private UIElement BuildHeader()
     {
-        var body = new StackPanel();
-        body.Children.Add(new TextBlock { Text = "개인별 쪽지", Style = Res<Style>("PageTitle"), VerticalAlignment = VerticalAlignment.Center });
+        var page = new StackPanel();
+        page.Children.Add(new TextBlock { Text = "개인별 쪽지", Style = Res<Style>("PageTitle"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 0, 12) });
 
-        var saved = new Grid { Margin = new Thickness(0, 14, 0, 0) };
-        saved.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        // ‘저장한 작업’은 제목과 떼어 접고 펼 수 있는 따로의 구역으로 둔다.
+        var toggleContent = new StackPanel { Orientation = Orientation.Horizontal };
+        _savedChevron.FontFamily = (FontFamily)FindResource("IconFont"); _savedChevron.FontSize = 11; _savedChevron.VerticalAlignment = VerticalAlignment.Center; _savedChevron.Margin = new Thickness(0, 0, 8, 0);
+        toggleContent.Children.Add(_savedChevron);
+        toggleContent.Children.Add(new TextBlock { Text = "저장한 작업", FontWeight = FontWeights.Bold, FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
+        _savedCount.Foreground = Res<Brush>("Muted"); _savedCount.FontSize = 12; _savedCount.VerticalAlignment = VerticalAlignment.Center; _savedCount.Margin = new Thickness(8, 0, 0, 0);
+        toggleContent.Children.Add(_savedCount);
+        var toggle = new Button
+        {
+            Content = toggleContent, Style = Res<Style>("LinkButton"), Foreground = Res<Brush>("TextStrong"), HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0), ToolTip = "저장한 작업 목록 접기/펼치기",
+        };
+        toggle.AutomationName("저장한 작업 접기 또는 펼치기");
+        toggle.Click += (_, _) => SetSavedExpanded(!_savedExpanded);
+
+        var saved = new Grid { Margin = new Thickness(0, 12, 0, 0) };
         saved.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         saved.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         saved.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         saved.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var label = FieldLabel("저장한 작업"); saved.Children.Add(label);
-        Grid.SetColumn(_saved, 1); _saved.Margin = new Thickness(0, 0, 8, 0); saved.Children.Add(_saved);
+        _saved.Margin = new Thickness(0, 0, 8, 0); saved.Children.Add(_saved);
         var load = SmallBtn("불러오기", (_, _) =>
         {
             if (_saved.SelectedItem is not PersonalizedWork work) { _status.Text = "불러올 저장 작업을 목록에서 먼저 고르세요."; return; }
@@ -320,7 +356,7 @@ public sealed class PersonalizedWindow : Window
             _work = fresh; _shown = null; Load();
             _status.Text = "저장한 작업을 불러왔습니다.";
         }, "고른 저장 작업으로 이 창의 내용을 바꿉니다. 저장하지 않은 변경이 있으면 먼저 저장할지 묻습니다.");
-        Grid.SetColumn(load, 2); saved.Children.Add(load);
+        Grid.SetColumn(load, 1); saved.Children.Add(load);
         var delete = SmallBtn("현재 작업 삭제", (_, _) =>
         {
             if (Dialogs.Show(this, "저장한 개인화 작업과 입력 데이터·본문을 삭제할까요? 발송 기록은 유지됩니다.", "개인화 작업 삭제", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
@@ -329,11 +365,21 @@ public sealed class PersonalizedWindow : Window
         delete.Style = Res<Style>("DangerButton"); delete.MinHeight = 26; delete.Padding = new Thickness(10, 0, 10, 0); delete.FontSize = 12; delete.Margin = new Thickness(0);
         var clean = SmallBtn("표시 없는 작업 정리", (_, _) => CleanUnmarkedWorks(),
             "‘임시 저장’ 표시도 발송 기록도 없는 저장 작업(이전 버전이 창을 닫을 때 자동 저장한 것 등)을 한꺼번에 지웁니다.");
-        Grid.SetColumn(clean, 3); saved.Children.Add(clean);
-        Grid.SetColumn(delete, 4); saved.Children.Add(delete);
-        body.Children.Add(saved);
-        body.Children.Add(_savedInfo);
-        return new Border { Style = Res<Style>("Card"), Padding = new Thickness(18, 16, 18, 14), Margin = new Thickness(0, 0, 0, 12), Child = body };
+        Grid.SetColumn(clean, 2); saved.Children.Add(clean);
+        Grid.SetColumn(delete, 3); saved.Children.Add(delete);
+        _savedBody.Children.Add(saved);
+        _savedBody.Children.Add(_savedInfo);
+        var section = new StackPanel();
+        section.Children.Add(toggle); section.Children.Add(_savedBody);
+        page.Children.Add(new Border { Style = Res<Style>("Card"), Padding = new Thickness(18, 12, 18, 12), Margin = new Thickness(0, 0, 0, 12), Child = section });
+        return page;
+    }
+
+    private void SetSavedExpanded(bool expanded)
+    {
+        _savedExpanded = expanded;
+        _savedBody.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        _savedChevron.Text = expanded ? "" : "";
     }
 
     private UIElement BuildTemplateSection()
@@ -1165,6 +1211,7 @@ public sealed class PersonalizedWindow : Window
     {
         var works = _store.GetPersonalizedWorks();
         _saved.ItemsSource = works;
+        _savedCount.Text = works.Count == 0 ? "없음" : $"{works.Count}개";
         _saved.SelectedItem = works.FirstOrDefault(w => w.Id == _work.Id);
         _savedInfo.Text = works.Count == 0
             ? "아직 저장한 작업이 없습니다. 작업은 ‘임시 저장’을 누르거나 발송할 때만 저장됩니다."

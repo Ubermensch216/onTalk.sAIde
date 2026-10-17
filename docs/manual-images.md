@@ -1,10 +1,10 @@
 # 사용자 매뉴얼 이미지 제작 기록
 
-갱신: 2026-10-06. [사용자 매뉴얼](../README.md)의 이미지 출처와 개인정보 처리 기준이다.
+갱신: 2026-10-17. [사용자 매뉴얼](../README.md)의 이미지 출처와 개인정보 처리 기준이다.
 
 ## 새 Home 화면
 
-`images/home-dashboard.png`는 `OnTalk.ContextPreview`가 가상 친구·쪽지·대화로 렌더링한 실제 WPF 패널이다. 온톡 창·사용자 이력·첨부의 직원 정보를 사용하지 않았으며 상태 표시에도 가상 자료임을 명시했다. 이전 `friends-main.png`는 연락 준비 중심의 과거 Home 화면 기록으로 유지한다.
+`images/home-dashboard.png`는 `OnTalk.ContextPreview`가 가상 친구·쪽지·대화로 렌더링한 실제 WPF 패널이다. 온톡 창·사용자 이력·첨부의 직원 정보를 사용하지 않았으며 상태 표시에도 가상 자료임을 명시했다. 상단 '체크한 친구와 함께(단체 대화/단체 쪽지)' 빠른 실행 및 3개 카드(최근 쪽지·최근 대화·최근 업무) 개편 화면을 반영했다. 이전 `friends-main.png`는 연락 준비 중심의 과거 Home 화면 기록으로 유지한다.
 
 ## 실제 메인 메뉴 화면
 
@@ -12,8 +12,9 @@
 
 | 파일 | 화면 |
 |---|---|
-| images/friends-main.png | 친구 메인·연락 준비 |
-| images/organization-main.png | 조직도 메인·담당자 후보 |
+| images/friends-main.png | 친구 메인·과거 연락 준비 (기록용) |
+| images/home-dashboard.png | Home 대시보드 (최신 그룹별 소통 정리) |
+| images/organization-main.png | 조직도 메인·선택 직원에게 쪽지 (개편된 선택 목록과 발송 버튼) |
 | images/conversations-main.png | 대화 목록·대화방 찾기 |
 | images/notes-main.png | 받은 쪽지 목록·쪽지 목록 지원 |
 
@@ -25,13 +26,17 @@
 
 ## 상세 작업의 합성 예시
 
-실제 개인 쪽지를 추가로 열거나 대화 내용을 보관하는 대신 tools/OnTalk.ContextPreview의 기존 가상 자료 WPF 캡처를 사용한다. 메인 화면과 함께 볼 수 있도록 개인정보 처리한 메인 이미지와 배치하고 ‘합성 예시’로 표시한다.
+실제 개인 쪽지를 추가로 열거나 대화 내용을 보관하는 대신 tools/OnTalk.ContextPreview의 가상 자료 WPF 캡처를 사용한다. 메인 화면과 함께 볼 수 있도록 개인정보 처리한 메인 이미지와 배치하거나 상세 화면 단위로 ‘합성 예시’로 표시한다.
 
 | 파일 | 가상 자료 화면과 주의점 |
 |---|---|
 | images/note-reading.png | 받은 쪽지 읽기 지원. 실제는 별도 상세창에 부착 |
 | images/note-writing.png | 새 쪽지 작성 지원. 실제는 별도 작성창에 부착 |
 | images/chat-support.png | 대화 원문 선택·답변 복사. 실제는 별도 대화창에 부착 |
+| images/prepared-contact-compose.png | 조직도 선택 직원 대상 쪽지 작성 도우미 (수신자 일괄 추가·예약·개인별 쪽지 전환) |
+| images/personalized-notes.png | 개인별 쪽지 작성과 미리보기 창 (서식·사용자정의 헤더/표·치환 미리보기·예약) |
+| images/personalized-notes-full.png | 개인별 쪽지 전체 작업 카드 (저장 작업·서식·데이터·본문 확인·발송 방식·연속 발송) |
+| images/personalized-saved-tags.png | 개인별 쪽지 저장한 작업의 상태 태그 (임시 저장·발송 완료·일부 발송) |
 
 실제 메인 화면과 합성 상세 패널을 함께 배치한 그림은 한 시점의 실제 부착 상태를 뜻하지 않는다. 미검증 대화 입력 반영 화면을 현재 제품 사용법의 예시로 넣지 않는다.
 
