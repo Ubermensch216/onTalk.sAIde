@@ -56,6 +56,44 @@ public static class Win32
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
 
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hwnd, int command);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint from, uint to, bool attach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    /// <summary>이미 열려 있는 창을 화면 앞으로 가져온다. 최소화되어 있으면 먼저 복원한다.</summary>
+    /// <returns>창이 실제로 앞에 왔는지.</returns>
+    internal static bool BringToFront(IntPtr hwnd)
+    {
+        if (!IsWindow(hwnd)) return false;
+        if (IsIconic(hwnd)) ShowWindow(hwnd, 9); // SW_RESTORE
+        if (GetForegroundWindow() == hwnd) return true;
+        // 다른 프로세스가 앞에 있으면 SetForegroundWindow가 거절될 수 있어, 앞 창의 입력 큐에 잠시 붙어 허용을 받는다.
+        var front = GetForegroundWindow();
+        var frontThread = front == IntPtr.Zero ? 0 : GetWindowThreadProcessId(front, out _);
+        var attached = frontThread != 0 && frontThread != GetCurrentThreadId() && AttachThreadInput(GetCurrentThreadId(), frontThread, true);
+        try
+        {
+            BringWindowToTop(hwnd);
+            SetForegroundWindow(hwnd);
+        }
+        finally
+        {
+            if (attached) AttachThreadInput(GetCurrentThreadId(), frontThread, false);
+        }
+        return GetForegroundWindow() == hwnd;
+    }
+
     internal const uint MONITOR_DEFAULTTONEAREST = 2;
     internal const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
 

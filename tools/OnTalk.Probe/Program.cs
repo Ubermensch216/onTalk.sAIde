@@ -44,6 +44,71 @@ var hwndArg = Option("--hwnd");
 var withContent = args.Contains("--content");
 var maxNodes = int.TryParse(Option("--max"), out var m) ? m : 6000;
 
+if (command == "friendopen")
+{
+    // 친구 화면에서 체크한 친구로 대화/쪽지 창 열기를 시험하고, 그동안 온톡 창 변화를 기록한다. 사용자 허락 범위에서만.
+    var kind = args.Contains("note") ? GroupOpenKind.Note : GroupOpenKind.Chat;
+    var task = Task.Run(() => FriendActions.OpenGroup(kind));
+    var shotDir = Option("--shots");
+    if (shotDir is not null)
+        _ = Task.Run(() =>
+        {
+            foreach (var t in new[] { 900, 1700, 2600 })
+            {
+                Thread.Sleep(t == 900 ? 900 : t == 1700 ? 800 : 900);
+                using var bmp = new System.Drawing.Bitmap(520, 360);
+                using (var g = System.Drawing.Graphics.FromImage(bmp)) g.CopyFromScreen(1400, 250, 0, 0, bmp.Size);
+                bmp.Save(Path.Combine(shotDir, $"t{t}.png"));
+            }
+        });
+    string last = "";
+    var clock = Stopwatch.StartNew();
+    while (!task.IsCompleted || clock.ElapsedMilliseconds < 1500)
+    {
+        var lines = new List<string>();
+        Win32.EnumWindows((h, _) =>
+        {
+            Win32.GetWindowThreadProcessId(h, out var pid);
+            if (Process.GetProcessesByName(ProcessName).Any(p => (uint)p.Id == pid) && Win32.ClassName(h).StartsWith("Chrome_WidgetWin", StringComparison.Ordinal))
+            {
+                Win32.GetWindowRect(h, out var r);
+                lines.Add($"{h:X} vis={Win32.IsWindowVisible(h)} icon={Win32.IsIconic(h)} {r.Right - r.Left}x{r.Bottom - r.Top} render={Win32.FindRenderChild(h) is not null} url={(Win32.IsWindowVisible(h) && Win32.FindRenderChild(h) is { } rr ? (MsaaReader.ReadRoot(rr)?.Value ?? "null").Split('/').Last() : "-")}");
+            }
+            return true;
+        }, IntPtr.Zero);
+        var now = string.Join("; ", lines.Order());
+        if (now != last) { Console.WriteLine($"[{clock.ElapsedMilliseconds}ms] {now}"); last = now; }
+        Thread.Sleep(200);
+    }
+    Console.WriteLine("result: " + task.Result);
+    return 0;
+}
+
+if (command == "friendmenu")
+{
+    // 체크한 친구 행을 우클릭해 뜬 팝업 메뉴의 항목 이름을 출력하고 Esc로 닫는다. 사용자 허락 범위에서만.
+    if (FriendActions.FindFriendsWindow() is not { } main || MsaaReader.ReadTree(main.Render) is not { } tree) { Console.WriteLine("친구 화면 없음"); return 1; }
+    var snap = MainPeopleParser.Parse(tree, OnTalk.Sidecar.Core.MainMenu.Friends, DateTimeOffset.Now);
+    var row = snap.SelectedKeys.Select(k => tree.DescendantsAndSelf().FirstOrDefault(n => n.Path == k)).FirstOrDefault(n => n is { Bounds.IsEmpty: false });
+    Console.WriteLine($"selected={snap.SelectedKeys.Count} row={(row is null ? "none" : row.Bounds.ToString())}");
+    if (row is null) return 1;
+    var pids = Process.GetProcessesByName(ProcessName).Select(p => (uint)p.Id).ToHashSet();
+    List<IntPtr> Popups() { var l = new List<IntPtr>(); Win32.EnumWindows((h, _) => { Win32.GetWindowThreadProcessId(h, out var pid); if (pids.Contains(pid) && Win32.IsWindowVisible(h) && Win32.ClassName(h).StartsWith("Chrome_WidgetWin", StringComparison.Ordinal)) l.Add(h); return true; }, IntPtr.Zero); return l; }
+    var before = Popups();
+    Console.WriteLine("right click: " + InputInjector.RightClick(main.Hwnd, row.Bounds));
+    Thread.Sleep(1500);
+    foreach (var p in Popups().Where(h => !before.Contains(h)))
+    {
+        Win32.ActivateAccessibility(p);
+        Win32.GetWindowRect(p, out var pr); Console.WriteLine($"popup {p:X} rect={pr.Left},{pr.Top} {pr.Width}x{pr.Height}");
+        if (MsaaReader.ReadTree(p) is { } t)
+            foreach (var n in t.DescendantsAndSelf().Where(n => !n.Bounds.IsEmpty && n.Name.Trim().Length > 0))
+                Console.WriteLine($"  {n.Role} \"{n.Name.Trim()}\" {n.Bounds}");
+    }
+    InputInjector.Tap(main.Hwnd, InputInjector.KeyEscape);
+    return 0;
+}
+
 if (command == "soak")
 {
     // 감시 루프의 메모리 사용을 본다.

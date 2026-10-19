@@ -67,6 +67,14 @@ public class MainPeopleTests
     }
 
     [Fact]
+    public void 온톡의_대화방_생성_오류_안내를_알아본다()
+    {
+        Assert.True(FriendActions.HasErrorNotice(Div(Div(Text("대화방 생성 중에 오류가 발생합니다.")), Text("확인"))));
+        Assert.True(FriendActions.HasErrorNotice(Div(Text("대화방 생성 중 에러가 발생했습니다.\n잠시 후 다시 시도해주세요."))));
+        Assert.False(FriendActions.HasErrorNotice(Div(Text("친구"), Text("확인"))));
+    }
+
+    [Fact]
     public void 우클릭_메뉴에서_단체_대화와_단체_쪽지_항목을_찾는다()
     {
         static AccNode Item(string label, string path) => new("listitem", "", "", 0, [Text(label)]) { Path = path, Bounds = new(10, 10, 80, 20) };

@@ -179,6 +179,8 @@ public sealed class HomePane : UserControl, IDisposable
                 GroupOpenStatus.NoSelection => ("화면에 보이는 체크한 친구를 찾지 못했습니다. 온톡에서 친구를 체크한 뒤 다시 누르세요.", false),
                 GroupOpenStatus.Covered => ("온톡 친구 목록이 가려져 있거나 Ctrl·Shift 키가 눌려 있습니다. 온톡 창을 보이게 한 뒤 다시 누르세요.", false),
                 GroupOpenStatus.MenuNotFound => ($"우클릭 메뉴에서 ‘{label}’를 찾지 못했습니다. 온톡에서 체크한 친구를 직접 우클릭해 ‘{label}’를 누르세요.", false),
+                GroupOpenStatus.AlreadyOpen => ("이 친구와의 대화창이 이미 열려 있어 그 창을 앞으로 가져왔습니다.", true),
+                GroupOpenStatus.OnTalkError => ($"온톡이 {label} 생성 오류를 표시해 안내창을 닫았습니다. 잠시 후 다시 시도하세요.", false),
                 _ => ($"‘{label}’를 눌렀지만 새 창을 확인하지 못했습니다. 온톡 화면을 확인하세요.", false),
             };
             ShowGroupStatus(text, ok ? "Success" : "Warn", TimeSpan.FromSeconds(ok ? 5 : 10));

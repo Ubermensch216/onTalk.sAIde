@@ -31,7 +31,7 @@ public sealed class ChatPane : UserControl, IDisposable
     private readonly HashSet<string> _selected = [];
     private ChatSnapshot _displayed;
     private ChatSnapshot _latest;
-    private readonly TextBlock _coverage = new(), _notice = new(), _status = new(), _summary = new();
+    private readonly TextBlock _notice = new(), _status = new(), _summary = new();
     private readonly StackPanel _rows = new(), _points = new();
     private readonly ComboBox _homeFriend = new();
     private readonly Button _saveHome = new() { Content = "이 친구의 Home에 정리 연결", IsEnabled = false };
@@ -62,15 +62,15 @@ public sealed class ChatPane : UserControl, IDisposable
         _slot = $"chat:{session:N}"; _displayed = _latest = snapshot;
         var root = new DockPanel { Margin = new Thickness(12), Background = (Brush)FindResource("PageBg") };
         TextBlock.SetForeground(root, (Brush)FindResource("TextStrong"));
-        var top = new StackPanel(); top.Children.Add(Label(snapshot.RoomHint, "SectionTitle"));
-        top.Children.Add(_coverage); top.Children.Add(_notice); top.Children.Add(_status);
+        var top = new StackPanel(); top.Children.Add(_notice); top.Children.Add(_status);
         DockPanel.SetDock(top, Dock.Top); root.Children.Add(top);
         var tabs = new TabControl { Style = (Style)FindResource("PillTabs") }; root.Children.Add(tabs);
         var source = Body();
-        source.Children.Add(Label("정리에 쓸 원문을 직접 고르세요. 읽힌 텍스트만 표시하며 첨부·이미지·시스템 알림은 분석하지 않습니다.", "Small"));
-        source.Children.Add(Button("최근 10건 선택", () => SelectRecent()));
-        source.Children.Add(Button("선택 해제", () => { _selected.Clear(); ClearHomeAnalysis(); Invalidate(); RenderMessages(); }));
-        source.Children.Add(Button("현재 읽힌 범위 다시 불러오기", Reload));
+        var sourceActions = new System.Windows.Controls.Primitives.UniformGrid { Columns = 3, Margin = new Thickness(0, 0, 0, 4) };
+        sourceActions.Children.Add(CompactButton("최근 10건", "최근 읽힌 텍스트 10건 선택", () => SelectRecent()));
+        sourceActions.Children.Add(CompactButton("선택 해제", "선택한 원문 모두 해제", () => { _selected.Clear(); ClearHomeAnalysis(); Invalidate(); RenderMessages(); }));
+        sourceActions.Children.Add(CompactButton("다시 읽기", "현재 읽힌 범위 다시 불러오기", Reload));
+        source.Children.Add(sourceActions);
         source.Children.Add(_rows); Tab(tabs, "원문 선택", source);
         var analysis = Body(); analysis.Children.Add(Button("선택한 원문 흐름 정리", async () => await AnalyzeAsync()));
         analysis.Children.Add(Label("AI 요약과 결정·질문·요청 후보입니다. 확정 여부·내 담당 여부는 원문과 이후 대화를 확인하세요.", "Caption"));
@@ -107,7 +107,7 @@ public sealed class ChatPane : UserControl, IDisposable
         task.Children.Add(Label("기한 직접 선택 · 날짜 미확인 메시지에서 상대 날짜를 자동 추정하지 않습니다.", "Caption")); task.Children.Add(_due);
         task.Children.Add(Button("원문 근거와 함께 업무 등록", Register)); Tab(tabs, "업무", task);
         Content = root;
-        foreach (var label in new[] { _coverage, _notice, _status, _summary }) { label.Style = (Style)FindResource("Small"); label.TextWrapping = TextWrapping.Wrap; label.Margin = new Thickness(0, 4, 0, 6); }
+        foreach (var label in new[] { _notice, _status, _summary }) { label.Style = (Style)FindResource("Small"); label.TextWrapping = TextWrapping.Wrap; label.Margin = new Thickness(0, 4, 0, 6); }
         _editor.TextChanged += (_, _) => { Invalidate(); _save.Stop(); if (!_disposed) _save.Start(); };
         _instruction.TextChanged += (_, _) => Invalidate();
         _save.Tick += (_, _) => { _save.Stop(); Save(); };
@@ -125,6 +125,12 @@ public sealed class ChatPane : UserControl, IDisposable
     {
         var button = new Button { Content = text, Margin = new Thickness(0, 4, 0, 8) };
         button.Click += (_, _) => { if (_active && !_disposed && !_busy) action(); }; return button;
+    }
+    private Button CompactButton(string text, string tip, Action action)
+    {
+        var button = Button(text, action);
+        button.ToolTip = tip; button.Padding = new Thickness(4, 0, 4, 0); button.Margin = new Thickness(2, 0, 2, 0);
+        return button;
     }
     private DraftRevision Revision => new(_session, _version);
     private void Invalidate() { _version++; _accept.IsEnabled = false; _inputTicket = null; _inputReview.Visibility = Visibility.Collapsed; _inputConfirmed.IsChecked = false; }
@@ -153,12 +159,11 @@ public sealed class ChatPane : UserControl, IDisposable
     }
     private void RenderMessages()
     {
-        _coverage.Text = _displayed.Coverage + $"\n정리/답변에 선택한 원문 {Chosen.Count}건";
         _rows.Children.Clear();
         foreach (var message in _displayed.Messages)
         {
             var checkbox = new CheckBox { Content = Label(message.Label, "Body"), IsChecked = _selected.Contains(message.Key) };
-            checkbox.Click += (_, _) => { if (checkbox.IsChecked == true) _selected.Add(message.Key); else _selected.Remove(message.Key); ClearHomeAnalysis(); Invalidate(); _coverage.Text = _displayed.Coverage + $"\n선택한 원문 {Chosen.Count}건"; };
+            checkbox.Click += (_, _) => { if (checkbox.IsChecked == true) _selected.Add(message.Key); else _selected.Remove(message.Key); ClearHomeAnalysis(); Invalidate(); };
             _rows.Children.Add(checkbox);
         }
         if (_displayed.Messages.Count == 0) _rows.Children.Add(Label("메시지 구조를 읽지 못했습니다. 온톡에서 날짜와 텍스트 메시지를 표시한 뒤 다시 확인하세요.", "Small"));

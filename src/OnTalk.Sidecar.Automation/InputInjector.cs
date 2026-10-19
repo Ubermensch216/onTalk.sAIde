@@ -35,12 +35,22 @@ internal static class InputInjector
     public static bool ClickPopupItem(IntPtr popup, AccBounds bounds)
     {
         if (bounds.IsEmpty || AnyModifierDown()) return false;
-        var (x, y) = bounds.Center;
-        var point = new Point { X = x, Y = y };
-        if (WindowFromPoint(point) != popup) return false;
+        // 사람 정보 말풍선이 항목 일부를 덮을 수 있다. 가운데가 가려졌으면 항목 안의 다른 지점 중 팝업이 실제로 보이는 곳을 누른다.
+        var (cx, cy) = bounds.Center;
+        var candidates = new[] { 0.5, 0.2, 0.8, 0.1, 0.9 }
+            .Select(f => new Point { X = bounds.X + (int)(bounds.Width * f), Y = cy })
+            .Concat([new Point { X = cx, Y = bounds.Y + 4 }, new Point { X = cx, Y = bounds.Y + bounds.Height - 4 }])
+            .Where(p => WindowFromPoint(p) == popup).ToList();
+        if (candidates.Count == 0) return false;
+        var point = candidates[0];
         GetCursorPos(out var cursor);
+        // 메뉴 항목도 마우스가 올라온 것을 처리한 뒤에 눌러야 동작한다. 이동 직후 바로 누르면 메뉴만 닫히고 아무 일도 안 일어날 수 있다.
+        SetCursorPos(point.X - 2, point.Y);
+        Thread.Sleep(120);
         SetCursorPos(point.X, point.Y);
+        Thread.Sleep(200);
         Mouse(MouseLeftDown);
+        Thread.Sleep(40);
         Mouse(MouseLeftUp);
         Thread.Sleep(350);
         SetCursorPos(cursor.X, cursor.Y);
@@ -74,6 +84,18 @@ internal static class InputInjector
         }
         GetCursorPos(out var cursor);
         SetCursorPos(point.X, point.Y);
+        // 온톡(웹 화면)은 마우스가 행 위로 온 것을 먼저 처리해야 우클릭 메뉴를 띄운다. 이동 직후 바로 누르면 메뉴가 안 뜰 수 있어
+        // 행 안에서 한 번 더 움직여 마우스 이동 이벤트를 확실히 보내고 잠시 기다린다.
+        if (right)
+        {
+            Thread.Sleep(100);
+            SetCursorPos(point.X - 3, point.Y);
+            Thread.Sleep(100);
+            SetCursorPos(point.X, point.Y);
+            // 행 위에 마우스를 두면 잠시 뒤 사람 정보 말풍선이 뜬다. 말풍선이 우클릭 직후에 뜨면 막 열린 메뉴와 겹쳐 메뉴가 닫히거나
+            // 가려지므로, 말풍선이 먼저 뜬 뒤에 우클릭해 메뉴가 말풍선 위에 열리게 한다.
+            Thread.Sleep(HoverSettle);
+        }
         Mouse(right ? MouseRightDown : MouseLeftDown);
         Mouse(right ? MouseRightUp : MouseLeftUp);
         Thread.Sleep(350);
@@ -144,6 +166,7 @@ internal static class InputInjector
         SendInput(1, [input], Marshal.SizeOf<Input>());
     }
 
+    private const int HoverSettle = 1300;
     private const uint KeyUp = 0x0002, MouseLeftDown = 0x0002, MouseLeftUp = 0x0004, MouseRightDown = 0x0008, MouseRightUp = 0x0010;
     private const uint SwpNoSize = 0x0001, SwpNoMove = 0x0002, SwpNoActivate = 0x0010;
 

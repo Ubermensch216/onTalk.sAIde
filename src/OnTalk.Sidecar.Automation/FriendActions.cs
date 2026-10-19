@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using OnTalk.Sidecar.Core;
 using MainMenu = OnTalk.Sidecar.Core.MainMenu;
 
@@ -20,6 +20,10 @@ public enum GroupOpenStatus
     MenuNotFound,
     /// <summary>메뉴를 눌렀지만 새 창을 확인하지 못했다.</summary>
     NotOpened,
+    /// <summary>온톡이 "대화방 생성 중에 오류가 발생합니다" 같은 오류 안내를 띄웠다. 온톡 쪽 실패다.</summary>
+    OnTalkError,
+    /// <summary>선택한 친구와의 대화창이 이미 열려 있어 온톡이 새 창을 만들지 않았다.</summary>
+    AlreadyOpen,
 }
 
 /// <summary>
@@ -29,6 +33,7 @@ public enum GroupOpenStatus
 public static class FriendActions
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan WindowWait = TimeSpan.FromSeconds(20);
 
     public static GroupOpenStatus OpenGroup(GroupOpenKind kind)
     {
@@ -40,23 +45,82 @@ public static class FriendActions
         var row = snapshot.SelectedKeys.Select(key => tree.DescendantsAndSelf().FirstOrDefault(n => n.Path == key))
             .FirstOrDefault(n => n is { Bounds.IsEmpty: false } && Inside(hwnd, n.Bounds));
         if (row is null) return GroupOpenStatus.NoSelection;
-        var before = Win32.VisibleOnTalkWindows().Select(w => w.Hwnd).ToHashSet();
+        var name = snapshot.People.FirstOrDefault(p => p.Key == row.Path)?.Name ?? "";
+        var openBefore = Win32.VisibleOnTalkWindows();
+        var before = openBefore.Select(w => w.Hwnd).ToHashSet();
+        // 이미 같은 상대와의 대화창이 열려 있으면 온톡은 새 창을 만들지 않는다. 그때는 그 창을 앞으로 띄운다.
+        var existing = kind == GroupOpenKind.Chat && name.Length > 0
+            ? openBefore.FirstOrDefault(w => w.Hwnd != hwnd && IsTarget(w.Render, kind) && Win32.WindowText(w.Hwnd).Contains(name, StringComparison.Ordinal))
+            : default;
+        // 같은 상대와의 대화창이 이미 열려 있으면 온톡에 다시 대화를 열게 하지 않는다. 온톡이 대화방 생성 오류를 띄우거나
+        // 새 창을 만들지 않으므로, 열려 있는 그 창을 바로 앞으로 가져온다.
+        if (existing.Hwnd != IntPtr.Zero)
+        {
+            DismissErrorNotice(render);
+            Win32.BringToFront(existing.Hwnd);
+            return GroupOpenStatus.AlreadyOpen;
+        }
+        // 이전 시도가 남긴 온톡 오류 안내창은 본창을 막고 우클릭을 받지 못하게 하므로 먼저 닫는다.
+        DismissErrorNotice(render);
         var popupsBefore = PopupWindows();
-        if (InputInjector.RightClick(hwnd, row.Bounds) is not (FocusOutcome.Focused or FocusOutcome.NotForeground))
-            return GroupOpenStatus.Covered;
         // 여러 명을 체크하면 메뉴가 '단체 대화/단체 쪽지'지만, 한 명만 체크하면 '대화/쪽지'로 나온다. 앞쪽 이름을 우선한다.
         var labels = kind == GroupOpenKind.Chat ? new[] { "단체 대화", "단체대화", "대화" } : ["단체 쪽지", "단체쪽지", "쪽지"];
         // 온톡 5.4.9의 우클릭 메뉴는 본창 안이 아니라 별도의 작은 팝업 창(Chrome_WidgetWin)이다.
         // 항목은 그 창 자체의 접근성 트리에 있고 클릭 동작을 알리지 않아 좌표로 누른다.
-        var invoked = Until(() => ClickPopupMenu(popupsBefore, labels), ok => ok);
+        // 다른 창(열려 있던 대화창 등)이 앞에 있다가 온톡 본창이 활성화되는 첫 우클릭은 메뉴가 뜨지 않을 수 있어 한 번 더 시도한다.
+        var invoked = false;
+        // 열린 대화창이 앞에 있으면 온톡 본창이 비활성이라 우클릭 메뉴가 뜨지 않으므로 본창을 먼저 앞으로 가져온다.
+        if (Win32.GetForegroundWindow() != hwnd)
+        {
+            Win32.BringToFront(hwnd);
+            Thread.Sleep(250);
+        }
+        for (var attempt = 0; attempt < 3 && !invoked; attempt++)
+        {
+            if (InputInjector.RightClick(hwnd, row.Bounds) is not (FocusOutcome.Focused or FocusOutcome.NotForeground))
+                return GroupOpenStatus.Covered;
+            invoked = Until(() => ClickPopupMenu(popupsBefore, labels), ok => ok, attempt == 0 ? TimeSpan.FromSeconds(2) : Wait);
+        }
         if (!invoked)
         {
             InputInjector.Tap(hwnd, InputInjector.KeyEscape);
             return GroupOpenStatus.MenuNotFound;
         }
-        var opened = Until(() => Win32.VisibleOnTalkWindows().Any(w => !before.Contains(w.Hwnd) && IsTarget(w.Render, kind)), ok => ok);
-        return opened ? GroupOpenStatus.Opened : GroupOpenStatus.NotOpened;
+        // 창이 뜨거나, 온톡이 오류 안내를 띄우면 기다림을 멈춘다. 오류 안내를 새 창 없음으로 뭉뚱그리지 않는다.
+        // 새 창은 화면에 뜬 뒤에도 페이지를 읽어 오는 동안 주소가 비어 있을 수 있어 넉넉히 기다린다.
+        // 같은 상대와의 창이 이미 열려 있으면 온톡은 새 창 대신 그 창을 앞으로 가져오므로, 앞에 온 대상 창도 연 것으로 본다.
+        // 본창 전체를 읽는 오류 안내 확인은 무거워서 자주 하면 온톡이 느려져 창이 늦게 뜬다. 가끔만 확인한다.
+        var errorCheck = Stopwatch.StartNew();
+        var result = Until(() =>
+        {
+            var windows = Win32.VisibleOnTalkWindows();
+            if (windows.Any(w => !before.Contains(w.Hwnd) && IsTarget(w.Render, kind))) return GroupOpenStatus.Opened;
+            var front = Win32.GetForegroundWindow();
+            if (front != hwnd && windows.Any(w => w.Hwnd == front && before.Contains(w.Hwnd) && IsTarget(w.Render, kind))) return GroupOpenStatus.Opened;
+            if (errorCheck.Elapsed < TimeSpan.FromSeconds(2)) return GroupOpenStatus.NotOpened;
+            errorCheck.Restart();
+            return HasErrorNotice(render) ? GroupOpenStatus.OnTalkError : GroupOpenStatus.NotOpened;
+        }, status => status != GroupOpenStatus.NotOpened, WindowWait);
+        // 오류 안내창을 남겨 두면 다음 시도가 막히므로 확인을 눌러 닫는다.
+        if (result == GroupOpenStatus.OnTalkError) DismissErrorNotice(render);
+        return result;
     }
+
+    /// <summary>온톡이 띄운 오류 안내창의 확인 단추를 눌러 닫는다. 안내창이 없으면 아무것도 하지 않는다.</summary>
+    private static bool DismissErrorNotice(IntPtr render)
+    {
+        if (MsaaReader.ReadTree(render) is not { } tree || !HasErrorNotice(tree)) return false;
+        var button = tree.DescendantsAndSelf().FirstOrDefault(n => n.Role == "pushbutton" && n.Name.Trim() == "확인" && !n.Bounds.IsEmpty);
+        if (button is null || !MsaaReader.Invoke(render, button)) return false;
+        return Until(() => !HasErrorNotice(render), gone => gone, TimeSpan.FromSeconds(2));
+    }
+
+    /// <summary>온톡 본창에 오류 안내("…오류가 발생합니다")가 떠 있는지.</summary>
+    internal static bool HasErrorNotice(IntPtr render) =>
+        MsaaReader.ReadTree(render) is { } tree && HasErrorNotice(tree);
+
+    internal static bool HasErrorNotice(AccNode tree) => tree.DescendantsAndSelf().Any(n =>
+        n.Role == AccNode.StaticText && (n.Name.Contains("오류가 발생", StringComparison.Ordinal) || n.Name.Contains("에러가 발생", StringComparison.Ordinal)));
 
     private static List<IntPtr> PopupWindows()
     {
@@ -113,14 +177,15 @@ public static class FriendActions
         Win32.GetWindowRect(hwnd, out var rect) && bounds.Center.X > rect.Left && bounds.Center.X < rect.Right &&
         bounds.Center.Y > rect.Top && bounds.Center.Y < rect.Bottom;
 
-    private static T Until<T>(Func<T> read, Func<T, bool> done)
+    private static T Until<T>(Func<T> read, Func<T, bool> done, TimeSpan? limit = null)
     {
         var clock = Stopwatch.StartNew();
         while (true)
         {
             var value = read();
-            if (done(value) || clock.Elapsed > Wait) return value;
+            if (done(value) || clock.Elapsed > (limit ?? Wait)) return value;
             Thread.Sleep(150);
         }
     }
 }
+
