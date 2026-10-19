@@ -18,7 +18,9 @@ public enum ActionStatus
 public sealed record SearchOutcome(ActionStatus Status, IntPtr SearchWindow, IReadOnlyList<PersonRow> Rows);
 
 /// <summary>전송 직전 온톡 작성 창이 이 내용과 같아야 한다.</summary>
-public sealed record ExpectedCompose(IReadOnlyList<string> Recipients, string Body, DateTime? Reservation, bool SmsChecked);
+/// <param name="Attachments">붙이기로 한 파일 이름. null이면 첨부가 없어야 한다.</param>
+public sealed record ExpectedCompose(IReadOnlyList<string> Recipients, string Body, DateTime? Reservation, bool SmsChecked,
+    IReadOnlyList<string>? Attachments = null);
 
 public enum SendStatus
 {
@@ -51,6 +53,7 @@ public static class ComposeActions
             Reservation: null,
             DialogOpen: false,
             SmsChecked: false,
+            Attachments.Count: 0,
         };
 
     /// <summary>이미 열려 있는 온톡 창 가운데 비어 있는 "새 쪽지" 창을 찾는다.</summary>
@@ -122,6 +125,21 @@ public static class ComposeActions
         return opened != IntPtr.Zero
             ? (ActionStatus.Ok, opened)
             : (ActionStatus.UiNotFound, IntPtr.Zero);
+    }
+
+    /// <summary>
+    /// 검색용으로 우리가 연 빈 "새 쪽지" 창을 닫는다. 수신자·본문·예약이 비어 있는 새 쪽지 창일 때만 닫아
+    /// 사용자가 쓰던 작성 창은 건드리지 않는다.
+    /// </summary>
+    public static void CloseEmptyComposeWindow(IntPtr compose)
+    {
+        if (compose == IntPtr.Zero || !Win32.IsWindow(compose) ||
+            ComposeWriter.Read(compose) is not { } state || !IsEmptyNewCompose(state))
+        {
+            return;
+        }
+        Win32.PostMessageW(compose, Win32.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        Until(() => !Win32.IsWindow(compose) || !Win32.IsWindowVisible(compose), gone => gone);
     }
 
     /// <summary>열려 있는 "받는 사람 추가" 검색 창을 닫아 다음 사람 검색에 영향이 없게 한다.</summary>
@@ -358,6 +376,30 @@ public static class ComposeActions
         return after is { DialogOpen: false } && after.Reservation == when ? ActionStatus.Ok : ActionStatus.Mismatch;
     }
 
+    /// <summary>"SMS 발송" 확인란을 원하는 상태로 맞추고, 다시 읽어 확인한다.</summary>
+    public static ActionStatus SetSms(IntPtr compose, bool on)
+    {
+        if (ComposeWriter.Read(compose) is not { } before || Tree(compose) is not { } tree)
+        {
+            return ActionStatus.NotCompose;
+        }
+        if (before.DialogOpen)
+        {
+            return ActionStatus.UiNotFound;
+        }
+        if (before.SmsChecked == on)
+        {
+            return ActionStatus.Ok;
+        }
+        var box = tree.DescendantsAndSelf().FirstOrDefault(n => n.Role == AccNode.CheckBox && n.Name == "SMS 발송");
+        if (box is null || !Click(compose, box))
+        {
+            return ActionStatus.UiNotFound;
+        }
+        var after = Until(() => ComposeWriter.Read(compose), s => s is not null && s.SmsChecked == on);
+        return after is not null && after.SmsChecked == on ? ActionStatus.Ok : ActionStatus.Mismatch;
+    }
+
     /// <summary>걸려 있는 예약을 풀어 즉시 전송 상태로 되돌린다.</summary>
     public static ActionStatus CancelReservation(IntPtr compose)
     {
@@ -435,7 +477,14 @@ public static class ComposeActions
                 ? $"예약 시각이 다릅니다. 온톡 창: {r:yyyy-MM-dd HH:mm}"
                 : "온톡 창에는 예약이 걸려 있지 않습니다.";
         }
-        return state.SmsChecked != expected.SmsChecked ? "SMS 발송 선택 상태가 다릅니다." : null;
+        if (state.SmsChecked != expected.SmsChecked)
+        {
+            return "SMS 발송 선택 상태가 다릅니다.";
+        }
+        return state.Attachments.Order().SequenceEqual((expected.Attachments ?? []).Order())
+            ? null
+            : state.Attachments.Count == 0 ? "온톡 창에 첨부 파일이 없습니다."
+            : $"첨부 파일이 다릅니다. 온톡 창: {string.Join(", ", state.Attachments)}";
     }
 
     private static AccNode? Tree(IntPtr hwnd) =>

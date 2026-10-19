@@ -9,9 +9,17 @@ public interface IPersonalizedAutomation
     SearchOutcome SearchRecipient(IntPtr compose, string name);
     ActionStatus AddRecipient(IntPtr compose, IntPtr search, PersonRow person);
     void CloseUserSearchWindow(IntPtr search);
+    /// <summary>이미 열려 있는 빈 새 쪽지 창(없으면 Zero). 검색용으로 새로 연 창만 나중에 닫기 위해 먼저 확인한다.</summary>
+    IntPtr FindEmptyNewComposeWindow() => IntPtr.Zero;
+    /// <summary>검색용으로 연 빈 새 쪽지 창을 닫는다. 내용이 들어 있으면 닫지 않는다.</summary>
+    void CloseEmptyComposeWindow(IntPtr compose) { }
     ApplyResult ApplyBody(IntPtr compose, string body, string? expectedCurrentBody);
     ActionStatus SetReservation(IntPtr compose, DateTime when);
     SendOutcome Send(IntPtr compose, ExpectedCompose expected);
+    /// <summary>작성 창에 파일 하나를 붙이고 첨부 목록에 늘었는지 확인한다.</summary>
+    ActionStatus AttachFile(IntPtr compose, string path) => ActionStatus.UiNotFound;
+    /// <summary>"SMS 발송" 확인란을 맞춘다.</summary>
+    ActionStatus SetSms(IntPtr compose, bool on) => ActionStatus.UiNotFound;
 }
 
 public sealed class OnTalkPersonalizedAutomation : IPersonalizedAutomation
@@ -33,6 +41,12 @@ public sealed class OnTalkPersonalizedAutomation : IPersonalizedAutomation
     public void CloseUserSearchWindow(IntPtr search) =>
         ComposeActions.CloseUserSearchWindow(search);
 
+    public IntPtr FindEmptyNewComposeWindow() =>
+        ComposeActions.FindEmptyNewComposeWindow();
+
+    public void CloseEmptyComposeWindow(IntPtr compose) =>
+        ComposeActions.CloseEmptyComposeWindow(compose);
+
     public ApplyResult ApplyBody(IntPtr compose, string body, string? expectedCurrentBody) =>
         ComposeWriter.ApplyBody(compose, body, expectedCurrentBody);
 
@@ -41,6 +55,12 @@ public sealed class OnTalkPersonalizedAutomation : IPersonalizedAutomation
 
     public SendOutcome Send(IntPtr compose, ExpectedCompose expected) =>
         ComposeActions.Send(compose, expected);
+
+    public ActionStatus AttachFile(IntPtr compose, string path) =>
+        AttachActions.Attach(compose, path);
+
+    public ActionStatus SetSms(IntPtr compose, bool on) =>
+        ComposeActions.SetSms(compose, on);
 }
 
 public sealed record PersonalizedBatchSummary(

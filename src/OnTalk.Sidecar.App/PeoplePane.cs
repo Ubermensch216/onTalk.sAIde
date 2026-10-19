@@ -27,6 +27,18 @@ public sealed class PeoplePane : UserControl, IDisposable
     private List<(ContactPerson Person, bool Native)> _selected = [];
     private string _nativeSignature = "\0", _rowsSignature = "\0", _candidatesSignature = "\0";
     private bool _disposed, _active = true;
+    // 온톡 사용자 상태 드롭다운과 같은 항목. 모두 체크되어 있으면 필터를 쓰지 않는 것이다.
+    private static readonly string[] PresenceStates = ["온라인", "자리비움", "회의중", "다른용무중", "오프라인"];
+    private readonly HashSet<string> _presenceAllowed = [.. PresenceStates];
+    private readonly WrapPanel _presenceRow = new() { Margin = new Thickness(0, 0, 0, 4) };
+
+    private static string NormalizeStatus(string status) => status.Replace(" ", "");
+
+    private bool MatchesPresence(ContactPerson person)
+    {
+        if (_presenceAllowed.Count == PresenceStates.Length) return true;
+        return _presenceAllowed.Contains(NormalizeStatus(person.Status));
+    }
 
     public PeoplePane(Action<ContactPreparation, bool> open)
     {
@@ -71,6 +83,21 @@ public sealed class PeoplePane : UserControl, IDisposable
         _selection.Margin = new Thickness(0, 4, 8, 4);
         headerDock.Children.Add(_selection);
         cardContent.Children.Add(headerDock);
+
+        // 접속 상태 필터: 선택한 직원 중 온라인/오프라인인 사람만 쪽지 대상에 포함한다.
+        cardContent.Children.Add(new TextBlock { Text = "사용자 상태 (체크한 상태만 쪽지 대상)", Style = (Style)FindResource("Caption"), Margin = new Thickness(0, 2, 0, 2) });
+        var filterRow = _presenceRow;
+        foreach (var state in PresenceStates)
+        {
+            var check = new CheckBox { Content = state, IsChecked = true, Margin = new Thickness(0, 2, 12, 2), VerticalAlignment = VerticalAlignment.Center };
+            check.Click += (_, _) =>
+            {
+                if (check.IsChecked == true) _presenceAllowed.Add(state); else _presenceAllowed.Remove(state);
+                Update();
+            };
+            filterRow.Children.Add(check);
+        }
+        cardContent.Children.Add(filterRow);
 
         // 선택 직원이 없을 때의 안내 문구
         _emptyNotice.Style = (Style)FindResource("Caption");
@@ -147,7 +174,7 @@ public sealed class PeoplePane : UserControl, IDisposable
     private TextBlock Label(string text, string style) => new() { Text = text, Style = (Style)FindResource(style), TextWrapping = TextWrapping.Wrap };
 
     /// <summary>쪽지 대상. 온톡에서 선택했거나 직접 고른 직원 중 제외하지 않은 사람.</summary>
-    public IReadOnlyList<ContactPerson> Chosen => _selected.Where(s => !_excluded.Contains(s.Person.SelectionKey)).Select(s => s.Person).ToList();
+    public IReadOnlyList<ContactPerson> Chosen => _selected.Where(s => !_excluded.Contains(s.Person.SelectionKey) && MatchesPresence(s.Person)).Select(s => s.Person).ToList();
     public string SelectionNotice => _selection.Text;
 
     private void Open(bool personalized)
@@ -174,7 +201,7 @@ public sealed class PeoplePane : UserControl, IDisposable
     private void Update()
     {
         var chosen = Chosen;
-        var rowsSignature = string.Join("|", _selected.Select(s => s.Person.SelectionKey + s.Native + _excluded.Contains(s.Person.SelectionKey)));
+        var rowsSignature = string.Join("|", _selected.Select(s => s.Person.SelectionKey + s.Native + _excluded.Contains(s.Person.SelectionKey) + s.Person.Status + MatchesPresence(s.Person)));
         if (rowsSignature != _rowsSignature)
         {
             _rowsSignature = rowsSignature;
@@ -201,9 +228,13 @@ public sealed class PeoplePane : UserControl, IDisposable
                 toggle.Click += (_, _) => { if (!_excluded.Remove(person.SelectionKey)) _excluded.Add(person.SelectionKey); Update(); };
                 row.Children.Add(toggle);
 
-                var labelText = person.Label + (native ? "" : "\n직접 선택") + (excluded ? "\n(제외됨)" : "");
-                var label = Label(labelText, excluded ? "Caption" : "Body");
-                if (excluded) label.Opacity = 0.5;
+                var filtered = !MatchesPresence(person);
+                var labelText = person.Label + (native ? "" : "\n직접 선택") +
+                    (person.Status.Length > 0 ? "\n접속 상태: " + person.Status : "") +
+                    (filtered ? "\n(접속 상태 필터로 제외됨)" : excluded ? "\n(제외됨)" : "");
+                var dim = excluded || filtered;
+                var label = Label(labelText, dim ? "Caption" : "Body");
+                if (dim) label.Opacity = 0.5;
                 row.Children.Add(label);
 
                 _rows.Children.Add(row);

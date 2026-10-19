@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -64,6 +65,13 @@ public sealed class GroupNoteWindow : Window
     private readonly ComboBox _reserveMinute = new() { Width = 70, Margin = new Thickness(0, 0, 4, 0) };
     private readonly StackPanel _reservePickers = new() { Orientation = Orientation.Horizontal };
     private readonly TextBlock _reserveSummary = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 8, 0, 0) };
+    private readonly CheckBox _useSms = new() { Content = "SMS 발송", VerticalAlignment = VerticalAlignment.Center };
+
+    // 첨부 파일. 파일 자체는 복사하지 않고 경로만 들고 있다가, 발송 때 온톡의 파일 선택창으로 붙인다.
+    private readonly List<string> _attachments = [];
+    private readonly StackPanel _attachList = new();
+    private readonly TextBlock _attachSummary = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0) };
+    private UIElement? _attachSection;
 
     // 하단 줄
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
@@ -71,7 +79,8 @@ public sealed class GroupNoteWindow : Window
     private readonly ScrollViewer _page = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly Button _stopButton, _prepareButton, _sendButton;
     private readonly List<UIElement> _interactive = [];
-    private readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromMilliseconds(800) };
+    private readonly Button _saveDraftButton, _deleteDraftButton;
+    private readonly TextBlock _draftInfo = new() { VerticalAlignment = VerticalAlignment.Center, FontSize = 12, Margin = new Thickness(4, 0, 0, 0) };
     private readonly CancellationTokenSource _closing = new();
     private CancellationTokenSource? _runCts;
     // 전송 단추를 누른 적이 있으면 이 창에서는 같은 쪽지를 다시 보내지 않는다.
@@ -110,6 +119,10 @@ public sealed class GroupNoteWindow : Window
             tip: "온톡 새 쪽지 창에 받는 사람·본문·예약만 채웁니다. 전송은 온톡 창에서 직접 합니다.");
         _sendButton = Btn("자동 발송", (_, _) => Run(send: true), style: "PrimaryButton",
             tip: "받는 사람·본문·예약을 채우고 검증한 뒤 바로 보냅니다.");
+        _saveDraftButton = Btn("임시저장", (_, _) => SaveDraftManually(),
+            tip: "지금 작성 중인 본문을 임시저장합니다. 누르지 않으면 저장되지 않으며, 다음에 같은 쪽지 창을 열 때 불러옵니다.");
+        _deleteDraftButton = Btn("임시저장 삭제", (_, _) => DeleteSavedDraft(), track: false,
+            tip: "저장해 둔 임시저장 쪽지를 지웁니다. 지금 화면의 본문은 그대로 남습니다.");
         _searchRecipientButton = Btn("온톡에서 찾기", OnSearchRecipientAsync, style: "SmallButton",
             tip: "온톡 사용자 검색으로 직급·소속을 확인해 받는 사람에 넣습니다.");
         _undoButton = new Button
@@ -130,6 +143,7 @@ public sealed class GroupNoteWindow : Window
         page.Children.Add(new TextBlock { Text = pageTitle, Style = Res<Style>("PageTitle"), Margin = new Thickness(2, 0, 0, 12) });
         page.Children.Add(BuildRecipientSection());
         page.Children.Add(BuildBodySection());
+        page.Children.Add(BuildAttachmentSection());
         page.Children.Add(BuildReservationSection());
         _page.Content = page;
 
@@ -155,9 +169,15 @@ public sealed class GroupNoteWindow : Window
         UpdateBody();
         UpdateAiScope();
         UpdateReservationState();
-        _autosave.Tick += (_, _) => SaveDraft();
-        Loaded += (_, _) => { _editor.Focus(); _editor.CaretIndex = _editor.Text.Length; };
-        Closed += (_, _) => { _closed = true; _closing.Cancel(); _runCts?.Cancel(); SaveDraft(); };
+        UpdateDraftState();
+        Loaded += (_, _) =>
+        {
+            _editor.Focus(); _editor.CaretIndex = _editor.Text.Length;
+            // 답장은 보낸 사람을 받는 사람으로 자동 지정한다(온톡 사용자 검색에서 한 명으로 확정되면 바로 넣는다).
+            if (source is not null && _people.Count == 0 && _recipientSearch.Text.Length > 0)
+                OnSearchRecipientAsync(this, new RoutedEventArgs());
+        };
+        Closed += (_, _) => { _closed = true; _closing.Cancel(); _runCts?.Cancel(); };
     }
 
     private IReadOnlyList<ContactPerson> Chosen => _people.Where(p => !_excluded.Contains(p.SelectionKey)).ToList();
@@ -203,7 +223,7 @@ public sealed class GroupNoteWindow : Window
         _editor.AutomationName("쪽지 내용"); _templateName.AutomationName("서식 제목");
         _recipientSearch.AutomationName("받는 사람 이름 검색"); _groupName.AutomationName("그룹 이름");
 
-        foreach (var c in new UIElement[] { _chips, _recipientSearch, _groups, _groupName, _templates, _templateName, _editor, _useReservation })
+        foreach (var c in new UIElement[] { _chips, _recipientSearch, _groups, _groupName, _templates, _templateName, _editor, _useReservation, _useSms })
             _interactive.Add(c);
         ForwardWheel(_editor);
 
@@ -221,8 +241,6 @@ public sealed class GroupNoteWindow : Window
             _revision++;
             UpdateBody();
             UpdateUndoButton();
-            _autosave.Stop();
-            _autosave.Start();
         };
         _editor.SelectionChanged += (_, _) => UpdateAiScope();
         _useReservation.Checked += (_, _) => UpdateReservationState();
@@ -315,16 +333,29 @@ public sealed class GroupNoteWindow : Window
                 Margin = new Thickness(0, 0, 0, 4),
             });
         }
+        // 이름·직급·소속이 같은 대상은 빨강, 이름만 같은 동명이인은 주황으로 칩을 물들여 어느 사람인지 바로 보이게 한다.
+        var active = Chosen;
+        var sameIdentity = active.GroupBy(p => p.DisplayIdentity).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        var sameName = active.Where(p => !sameIdentity.Contains(p.DisplayIdentity))
+            .GroupBy(p => p.Name).Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet();
         foreach (var person in _people)
         {
             var excluded = _excluded.Contains(person.SelectionKey);
+            var dupGroup = !excluded ? sameIdentity.IndexOf(person.DisplayIdentity) : -1;
+            var isDuplicate = dupGroup >= 0;
+            var isNamesake = !excluded && !isDuplicate && sameName.Contains(person.Name);
             var row = new StackPanel { Orientation = Orientation.Horizontal };
             var titlePart = person.Title.Length > 0 ? $" · {person.Title}" : "";
-            row.Children.Add(new TextBlock
+            var tag = isDuplicate ? (sameIdentity.Count > 1 ? $" · 중복{dupGroup + 1}" : " · 중복") : isNamesake ? " · 동명" : "";
+            var label = new TextBlock
             {
-                Text = $"{person.Name}{titlePart}", VerticalAlignment = VerticalAlignment.Center, FontSize = 12.5,
+                Text = $"{person.Name}{titlePart}{tag}", VerticalAlignment = VerticalAlignment.Center, FontSize = 12.5,
                 TextDecorations = excluded ? TextDecorations.Strikethrough : null,
-            });
+                FontWeight = isDuplicate ? FontWeights.SemiBold : FontWeights.Normal,
+            };
+            if (isDuplicate) label.Foreground = Res<Brush>("Danger");
+            else if (isNamesake) label.Foreground = Res<Brush>("Warn");
+            row.Children.Add(label);
             var toggle = new Button
             {
                 Content = excluded ? "" : "", Style = Res<Style>("IconButton"), Width = 20, Height = 20, FontSize = 9,
@@ -336,15 +367,20 @@ public sealed class GroupNoteWindow : Window
             _chips.Children.Add(new Border
             {
                 Child = row, Padding = new Thickness(10, 3, 6, 3), Margin = new Thickness(0, 0, 6, 6), CornerRadius = new CornerRadius(13),
-                Background = Res<Brush>(excluded ? "Surface" : "SurfaceAlt"), BorderBrush = Res<Brush>("Line"), BorderThickness = new Thickness(1),
-                Opacity = excluded ? 0.55 : 1, ToolTip = person.Label + (excluded ? "\n(이번 쪽지에서 뺌)" : ""),
+                Background = Res<Brush>(isDuplicate ? "DangerSoft" : isNamesake ? "WarnSoft" : excluded ? "Surface" : "SurfaceAlt"),
+                BorderBrush = Res<Brush>(isDuplicate ? "Danger" : isNamesake ? "WarnLine" : "Line"),
+                BorderThickness = new Thickness(isDuplicate ? 1.5 : 1),
+                Opacity = excluded ? 0.55 : 1,
+                ToolTip = person.Label + (excluded ? "\n(이번 쪽지에서 뺌)" : isDuplicate ? "\n(이름·직급·소속이 같은 대상 — 하나만 남기세요)" : isNamesake ? "\n(동명이인 — 직급·소속을 확인하세요)" : ""),
             });
         }
-        var chosen = Chosen;
+        var chosen = active;
         _recipientSummary.Text = _excluded.Count == 0 ? $"{chosen.Count}명" : $"{chosen.Count}명 · 뺀 사람 {_excluded.Count}명";
-        _identityWarn.Text = chosen.GroupBy(p => p.DisplayIdentity).Any(g => g.Count() > 1)
-            ? "이름·직급·소속이 같은 대상이 있습니다. 하나만 남기세요."
-            : chosen.GroupBy(p => p.Name).Any(g => g.Count() > 1) ? "동명이인이 있습니다. 직급·소속을 확인하세요." : "";
+        _identityWarn.Text = sameIdentity.Count > 0
+            ? "이름·직급·소속이 같은 대상이 있습니다. 빨갛게 표시된 칩 중 하나만 남기세요."
+            : sameName.Count > 0 ? "동명이인이 있습니다. 주황색으로 표시된 칩의 직급·소속을 확인하세요." : "";
+        _identityWarn.Foreground = Res<Brush>(sameIdentity.Count > 0 ? "Danger" : "Warn");
+        _identityWarn.FontWeight = sameIdentity.Count > 0 ? FontWeights.SemiBold : FontWeights.Normal;
         _identityWarn.Visibility = _identityWarn.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateButtons();
     }
@@ -383,15 +419,27 @@ public sealed class GroupNoteWindow : Window
         {
             var found = await Task.Run<(ActionStatus Status, IntPtr SearchWindow, IReadOnlyList<PersonRow> Rows)>(() =>
             {
+                // 온톡 검색은 새 쪽지 창의 '추가'로만 열린다. 이미 열려 있던 빈 창이 아니라 검색하려고 우리가 연 창은
+                // 결과를 받은 뒤 닫아, 이 작업 창만 남게 한다.
+                var preexisting = _automation.FindEmptyNewComposeWindow();
                 var (ensure, hwnd) = _automation.EnsureEmptyNewComposeWindow();
                 if (ensure != ActionStatus.Ok || hwnd == IntPtr.Zero)
                     return (ActionStatus.NotCompose, IntPtr.Zero, []);
-                var res = _automation.SearchRecipient(hwnd, query);
-                if (res.SearchWindow != IntPtr.Zero)
-                    _automation.CloseUserSearchWindow(res.SearchWindow);
-                return (res.Status, res.SearchWindow, res.Rows);
+                var openedByUs = preexisting == IntPtr.Zero;
+                try
+                {
+                    var res = _automation.SearchRecipient(hwnd, query);
+                    if (res.SearchWindow != IntPtr.Zero)
+                        _automation.CloseUserSearchWindow(res.SearchWindow);
+                    return (res.Status, res.SearchWindow, res.Rows);
+                }
+                finally
+                {
+                    if (openedByUs) _automation.CloseEmptyComposeWindow(hwnd);
+                }
             });
             if (_closed) return;
+            BringBack();
             if (found.Status != ActionStatus.Ok)
             {
                 Status("온톡에서 사용자 검색을 실행하지 못했습니다. 온톡 본창이 열려 있는지 확인하세요.", "Warn");
@@ -402,20 +450,42 @@ public sealed class GroupNoteWindow : Window
                 Status($"‘{query}’ 이름으로 검색된 사람이 없습니다.", "Warn");
                 return;
             }
-            if (found.Rows.Count == 1)
+            var rows = found.Rows;
+            if (rows.Count > 1 && _source is not null && query == _source.Note.SenderName)
             {
-                var person = ToContactPerson(found.Rows[0].ToRecipient());
+                // 답장: 받은 쪽지 머리글에 보인 직급·소속(잘려 있을 수 있음)으로 동명이인을 좁힌다.
+                var hint = _source.Note.SenderDetail.Trim().TrimEnd('…', '.').Trim();
+                if (hint.Length > 0)
+                {
+                    var narrowed = rows.Where(r => $"{r.Title} {string.Join(" ", r.Details)}".Contains(hint)).ToList();
+                    if (narrowed.Count == 1) rows = narrowed;
+                }
+            }
+            if (rows.Count == 1)
+            {
+                var person = ToContactPerson(rows[0].ToRecipient());
                 AddPerson(person);
                 _recipientSearch.Clear();
                 Status($"‘{person.Label}’ 님을 받는 사람에 추가했습니다.");
                 return;
             }
-            ShowCandidatePicker(query, found.Rows);
+            ShowCandidatePicker(query, rows);
         }
         finally
         {
             if (!_closed) _searchRecipientButton.IsEnabled = _runCts is null;
         }
+    }
+
+    /// <summary>온톡 창을 오가는 조작이 끝나면 작업 중이던 이 창을 다시 앞으로 가져온다.</summary>
+    private void BringBack()
+    {
+        if (_closed) return;
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+        Topmost = true;
+        Topmost = false;
+        _recipientSearch.Focus();
     }
 
     private void ShowCandidatePicker(string query, IReadOnlyList<PersonRow> rows)
@@ -625,7 +695,93 @@ public sealed class GroupNoteWindow : Window
         row.Children.Add(_reservePickers);
         body.Children.Add(row);
         body.Children.Add(_reserveSummary);
-        return WorkUi.Section(this, "3", "발송 방식", "", body);
+        _useSms.Margin = new Thickness(0, 10, 0, 0);
+        _useSms.ToolTip = "온톡 쪽지 창의 ‘SMS 발송’ 확인란을 선택한 상태로 보냅니다.";
+        body.Children.Add(_useSms);
+        body.Children.Add(new TextBlock
+        {
+            Text = "온톡 쪽지 창의 ‘SMS 발송’을 선택합니다. 실제 문자 발송 여부와 비용은 온톡·기관 설정에 따릅니다.",
+            FontSize = 11.5, Foreground = Res<Brush>("Muted"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(22, 2, 0, 0),
+        });
+        return WorkUi.Section(this, "4", "발송 방식", "", body);
+    }
+
+    // ───────────────────────── 첨부 파일 ─────────────────────────
+
+    private UIElement BuildAttachmentSection()
+    {
+        var body = new StackPanel();
+        var bar = new WrapPanel();
+        bar.Children.Add(Btn("파일 추가…", (_, _) => OnPickAttachments(), style: "SmallButton",
+            tip: $"붙일 파일을 고릅니다. 파일을 이 영역에 끌어다 놓아도 됩니다. 파일당 최대 20MB, 최대 {NoteAttachments.MaxCount}개, exe 파일은 붙일 수 없습니다."));
+        body.Children.Add(bar);
+        body.Children.Add(_attachList);
+        body.Children.Add(_attachSummary);
+        var section = WorkUi.Section(this, "3", "첨부 파일", "", body);
+        section.AllowDrop = true;
+        section.DragOver += (_, e) =>
+        {
+            e.Effects = _runCts is null && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+            e.Handled = true;
+        };
+        section.Drop += (_, e) =>
+        {
+            if (_runCts is null && e.Data.GetData(DataFormats.FileDrop) is string[] dropped) AddAttachments(dropped);
+            e.Handled = true;
+        };
+        _attachSection = section;
+        RenderAttachments();
+        return section;
+    }
+
+    private void OnPickAttachments()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog { Title = "첨부할 파일 선택", Multiselect = true, CheckFileExists = true };
+        if (dialog.ShowDialog(this) == true) AddAttachments(dialog.FileNames);
+    }
+
+    private void AddAttachments(IEnumerable<string> files)
+    {
+        var added = 0;
+        foreach (var path in files)
+        {
+            if (Directory.Exists(path)) { Status($"폴더는 붙일 수 없습니다: {Path.GetFileName(path)}", "Warn"); continue; }
+            if (_attachments.Contains(path, StringComparer.OrdinalIgnoreCase)) continue;
+            // 이름·형식·크기·개수는 발송 때와 같은 규칙으로 지금 확인한다.
+            if (NoteAttachments.Validate([.. _attachments, path]) is { } problem) { Status(problem, "Warn"); continue; }
+            _attachments.Add(path);
+            added++;
+        }
+        RenderAttachments();
+        UpdateButtons();
+        if (added > 0) Status($"첨부 {added}개를 추가했습니다. 발송 때 온톡 쪽지 창에 붙입니다.", "Muted");
+    }
+
+    private void RenderAttachments()
+    {
+        _attachList.Children.Clear();
+        foreach (var path in _attachments.ToList())
+        {
+            var row = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var size = new FileInfo(path) is { Exists: true } info ? NoteAttachments.Size(info.Length) : "파일 없음";
+            row.Children.Add(new TextBlock { Text = "📎 " + Path.GetFileName(path), ToolTip = path, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
+            var sizeText = new TextBlock { Text = size, Foreground = Res<Brush>("Muted"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 8, 0) };
+            Grid.SetColumn(sizeText, 1); row.Children.Add(sizeText);
+            var remove = new Button { Content = "✕", Style = Res<Style>("SmallButton"), ToolTip = "첨부에서 뺍니다(원본 파일은 그대로)." };
+            remove.AutomationName("첨부 제거 " + Path.GetFileName(path));
+            remove.Click += (_, _) => { _attachments.Remove(path); RenderAttachments(); UpdateButtons(); };
+            Grid.SetColumn(remove, 2); row.Children.Add(remove);
+            _attachList.Children.Add(row);
+        }
+        var total = _attachments.Sum(p => new FileInfo(p) is { Exists: true } f ? f.Length : 0);
+        _attachSummary.Text = _attachments.Count == 0
+            ? "붙인 파일이 없습니다. 파일당 최대 20MB, 최대 10개, exe 파일은 붙일 수 없습니다."
+            : $"첨부 {_attachments.Count}개 · 합계 {NoteAttachments.Size(total)}" +
+              (total > NoteAttachments.MaxFileBytes ? " · 합계가 20MB를 넘으면 온톡이 거절할 수 있습니다." : "");
+        _attachSummary.Foreground = Res<Brush>(total > NoteAttachments.MaxFileBytes ? "Warn" : "Muted");
     }
 
     private UIElement BuildActionBar()
@@ -638,7 +794,21 @@ public sealed class GroupNoteWindow : Window
         buttons.Children.Add(_prepareButton);
         _sendButton.Margin = new Thickness(0);
         buttons.Children.Add(_sendButton);
-        bar.Children.Add(buttons);
+
+        _draftInfo.Foreground = Res<Brush>("Muted");
+        var draftButtons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left };
+        draftButtons.Children.Add(_saveDraftButton);
+        draftButtons.Children.Add(_deleteDraftButton);
+        draftButtons.Children.Add(_draftInfo);
+
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(draftButtons, 0);
+        Grid.SetColumn(buttons, 1);
+        row.Children.Add(draftButtons);
+        row.Children.Add(buttons);
+        bar.Children.Add(row);
         return new Border { Background = Res<Brush>("Surface"), BorderBrush = Res<Brush>("Line"), BorderThickness = new Thickness(0, 1, 0, 0), Child = bar };
     }
 
@@ -712,10 +882,29 @@ public sealed class GroupNoteWindow : Window
     private void UpdateUndoButton() =>
         _undoButton.IsEnabled = !_aiBusy && _runCts is null && _undoText is not null && _undoRevision == _revision;
 
-    private void SaveDraft()
+    // 임시저장은 사용자가 '임시저장' 단추를 누를 때만 한다(자동 저장 없음).
+    private void SaveDraftManually()
     {
-        _autosave.Stop();
+        if (_editor.Text.Length == 0) { Status("임시저장할 본문이 없습니다.", "Warn"); return; }
         _store.SaveDraft(_draftSlot, _editor.Text, DateTimeOffset.Now);
+        UpdateDraftState();
+        Status("임시저장했습니다.", "Success");
+    }
+
+    private void DeleteSavedDraft()
+    {
+        _store.DeleteDraft(_draftSlot);
+        if (_draftSlot == DraftText.NewSlot) _store.DeleteDraft(GroupDraftSlot);
+        UpdateDraftState();
+        Status("임시저장한 쪽지를 삭제했습니다.", "Muted");
+    }
+
+    private void UpdateDraftState()
+    {
+        var saved = _store.GetStoredDraft(_draftSlot)
+            ?? (_draftSlot == DraftText.NewSlot ? _store.GetStoredDraft(GroupDraftSlot) : null);
+        _deleteDraftButton.IsEnabled = saved is not null && _runCts is null;
+        _draftInfo.Text = saved is null ? "임시저장 없음" : $"임시저장 {saved.UpdatedAt.LocalDateTime:MM-dd HH:mm}";
     }
 
     private void ReloadTemplates(string? select = null)
@@ -920,9 +1109,11 @@ public sealed class GroupNoteWindow : Window
         if (BodyProblem() is { } problem) { Status(problem, "Warn"); _editor.Focus(); return; }
         if (!TryGetReservation(out var reservation, out var reserveError)) { Status(reserveError, "Warn"); return; }
         if (send && _attempted) { Status("이 창에서 이미 발송을 시도했습니다. 온톡 보낸 쪽지함을 확인하세요.", "Warn"); return; }
-        if (send && !ConfirmSend(chosen, reservation)) { Status("발송을 취소했습니다.", "Muted"); return; }
+        var attachments = _attachments.ToList();
+        var sms = _useSms.IsChecked == true;
+        if (NoteAttachments.Validate(attachments) is { } attachProblem) { Status(attachProblem, "Warn"); return; }
+        if (send && !ConfirmSend(chosen, reservation, attachments, sms)) { Status("발송을 취소했습니다.", "Muted"); return; }
 
-        SaveDraft();
         using var cts = new CancellationTokenSource();
         _runCts = cts;
         SetRunning(true);
@@ -936,9 +1127,9 @@ public sealed class GroupNoteWindow : Window
                     _progress.Value = done;
                     Status(text, "Muted");
                 }),
-                cts.Token);
+                cts.Token, attachments, sms);
             if (outcome.Attempted) _attempted = true;
-            if (outcome.Result == GroupNoteResult.Sent) _store.SaveDraft(_draftSlot, "", DateTimeOffset.Now);
+            if (outcome.Result == GroupNoteResult.Sent) _store.DeleteDraft(_draftSlot);
             if (_closed) return;
             Status(outcome.Message, outcome.Result switch
             {
@@ -959,7 +1150,7 @@ public sealed class GroupNoteWindow : Window
         }
     }
 
-    private bool ConfirmSend(IReadOnlyList<ContactPerson> chosen, DateTime? reservation)
+    private bool ConfirmSend(IReadOnlyList<ContactPerson> chosen, DateTime? reservation, IReadOnlyList<string> attachments, bool sms)
     {
         var sample = string.Join("\n", chosen.Take(8).Select(p => $"  · {p.Name} ({p.Title} · {string.Join(" · ", p.Organization)})"));
         var more = chosen.Count > 8 ? $"\n  외 {chosen.Count - 8}명" : "";
@@ -967,7 +1158,8 @@ public sealed class GroupNoteWindow : Window
         var preview = body.Length > 180 ? body[..180] + "…" : body;
         var prompt =
             $"{chosen.Count}명에게 같은 쪽지 한 통을 보냅니다.\n\n" +
-            $"발송 방식: {(reservation is { } at ? $"{at:yyyy-MM-dd HH:mm} 예약 발송" : "즉시 발송")}\n" +
+            $"발송 방식: {(reservation is { } at ? $"{at:yyyy-MM-dd HH:mm} 예약 발송" : "즉시 발송")}{(sms ? " · SMS 발송 선택" : "")}\n" +
+            (attachments.Count > 0 ? $"첨부 파일 {attachments.Count}개: {string.Join(", ", attachments.Take(5).Select(Path.GetFileName))}{(attachments.Count > 5 ? $" 외 {attachments.Count - 5}개" : "")}\n" : "") +
             $"받는 사람:\n{sample}{more}\n\n" +
             $"본문 ({NoteBytes.Count(body):N0} Bytes):\n{preview}\n\n" +
             "보낸 뒤에는 되돌릴 수 없습니다. 보낼까요?";
@@ -978,6 +1170,7 @@ public sealed class GroupNoteWindow : Window
     {
         foreach (var control in _interactive) control.IsEnabled = !running;
         _searchRecipientButton.IsEnabled = !running;
+        if (_attachSection is not null) _attachSection.IsEnabled = !running;
         foreach (var b in _aiButtons) b.IsEnabled = !running && !_aiBusy;
         UpdateUndoButton();
         _stopButton.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
@@ -985,5 +1178,6 @@ public sealed class GroupNoteWindow : Window
         _progress.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
         UpdateReservationState();
         if (!running) UpdateButtons();
+        UpdateDraftState();
     }
 }

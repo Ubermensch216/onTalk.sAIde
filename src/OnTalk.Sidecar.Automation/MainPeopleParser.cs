@@ -6,7 +6,7 @@ namespace OnTalk.Sidecar.Automation;
 /// <summary>친구 목록/조직도 트리와 잠깐 표시되는 사람 상세를 읽는다. 선택 가능 상태를 선택으로 오인하지 않는다.</summary>
 public static class MainPeopleParser
 {
-    private static readonly HashSet<string> Statuses = ["온라인", "오프라인", "자리비움", "다른 용무 중", "회의 중", "바쁨"];
+    private static readonly HashSet<string> Statuses = ["온라인", "오프라인", "자리비움", "다른 용무 중", "다른용무중", "회의 중", "회의중", "바쁨"];
     private sealed record Row(AccNode Node, ContactPerson Person, IReadOnlyList<AccNode> Ancestors);
 
     public static PeopleSnapshot Parse(AccNode root, MainMenu menu, DateTimeOffset observedAt)

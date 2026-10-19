@@ -80,10 +80,12 @@ public static partial class NotePersonalization
 public static class PreparedRecipientMatch
 {
     // Compare whole organization segments, never substrings (총무과 != 총무과지원팀).
+    // 친구 목록은 "부산광역시 사하구 | 민원여권과"처럼 공백으로 이어 붙여 보여 주고, 검색 결과는
+    // "부산광역시 / 사하구 / 자치행정국 / 민원여권과"처럼 단계별로 나누어 보여 주므로 공백도 구분자로 본다.
     public static bool Matches(ContactPerson person, Recipient candidate)
     {
         if (person.Name != candidate.Name || person.Title != candidate.Title || person.Organization.Count == 0) return false;
-        static string[] Segments(IEnumerable<string> values) => values.SelectMany(v => v.Split(['/', '|', '·', '>'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)).ToArray();
+        static string[] Segments(IEnumerable<string> values) => values.SelectMany(v => v.Split(['/', '|', '·', '>', ' ', ' '], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)).ToArray();
         var expected = Segments(person.Organization);
         var actual = Segments(candidate.Details);
         return expected.Length > 0 && expected.All(actual.Contains);

@@ -44,7 +44,8 @@ public static class FriendActions
         var popupsBefore = PopupWindows();
         if (InputInjector.RightClick(hwnd, row.Bounds) is not (FocusOutcome.Focused or FocusOutcome.NotForeground))
             return GroupOpenStatus.Covered;
-        var labels = kind == GroupOpenKind.Chat ? new[] { "단체 대화", "단체대화" } : ["단체 쪽지", "단체쪽지"];
+        // 여러 명을 체크하면 메뉴가 '단체 대화/단체 쪽지'지만, 한 명만 체크하면 '대화/쪽지'로 나온다. 앞쪽 이름을 우선한다.
+        var labels = kind == GroupOpenKind.Chat ? new[] { "단체 대화", "단체대화", "대화" } : ["단체 쪽지", "단체쪽지", "쪽지"];
         // 온톡 5.4.9의 우클릭 메뉴는 본창 안이 아니라 별도의 작은 팝업 창(Chrome_WidgetWin)이다.
         // 항목은 그 창 자체의 접근성 트리에 있고 클릭 동작을 알리지 않아 좌표로 누른다.
         var invoked = Until(() => ClickPopupMenu(popupsBefore, labels), ok => ok);
@@ -81,10 +82,14 @@ public static class FriendActions
         return false;
     }
 
-    /// <summary>메뉴 항목. 글자가 정확히 같은 화면에 보이는 요소 중 가장 안쪽(글자를 감싼 요소)을 고른다.</summary>
+    /// <summary>
+    /// 메뉴 항목. 글자가 정확히 같은 화면에 보이는 요소 중 가장 안쪽(글자를 감싼 요소)을 고른다.
+    /// <paramref name="labels"/>는 우선순위 순서이며, 앞쪽 이름의 항목이 있으면 뒤쪽 이름은 보지 않는다.
+    /// </summary>
     internal static AccNode? MenuItem(AccNode tree, IReadOnlyCollection<string> labels) =>
-        tree.DescendantsAndSelf().LastOrDefault(n => !n.Bounds.IsEmpty && n.Role != AccNode.StaticText &&
-            (labels.Contains(n.Name.Trim()) || n.Children.Any(c => c.Role == AccNode.StaticText && labels.Contains(c.Name.Trim()))));
+        labels.Select(label => tree.DescendantsAndSelf().LastOrDefault(n => !n.Bounds.IsEmpty && n.Role != AccNode.StaticText &&
+            (n.Name.Trim() == label || n.Children.Any(c => c.Role == AccNode.StaticText && c.Name.Trim() == label))))
+            .FirstOrDefault(item => item is not null);
 
     internal static (IntPtr Hwnd, IntPtr Render)? FindFriendsWindow()
     {

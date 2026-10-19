@@ -598,6 +598,19 @@ public sealed partial class ProfileStore : IDisposable
         return cmd.ExecuteScalar() as string;
     }
 
+    public StoredDraft? GetStoredDraft(string slot)
+    {
+        using var cmd = Command("SELECT slot, body, updated_at FROM draft WHERE slot = $slot", ("$slot", slot));
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? new StoredDraft(reader.GetString(0), reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2))) : null;
+    }
+
+    public void DeleteDraft(string slot)
+    {
+        using var cmd = Command("DELETE FROM draft WHERE slot = $slot", ("$slot", slot));
+        cmd.ExecuteNonQuery();
+    }
+
     public List<StoredDraft> GetDrafts(int limit = 50)
     {
         using var cmd = Command("SELECT slot, body, updated_at FROM draft ORDER BY julianday(updated_at) DESC, slot LIMIT $limit", ("$limit", limit));

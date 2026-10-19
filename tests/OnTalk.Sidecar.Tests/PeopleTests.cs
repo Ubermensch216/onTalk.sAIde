@@ -74,6 +74,13 @@ public class MainPeopleTests
         Assert.Equal("m/0", FriendActions.MenuItem(menu, ["단체 대화"])!.Path);
         Assert.Equal("m/1", FriendActions.MenuItem(menu, ["단체 쪽지", "단체쪽지"])!.Path);
         Assert.Null(FriendActions.MenuItem(Div(Item("영상회의", "m/3") with { Bounds = default }), ["영상회의"]));
+
+        // 한 명만 체크하면 메뉴 이름에 '단체'가 붙지 않는다(온톡 5.4.9: 대화·쪽지·영상회의·프로필 보기·친구 삭제).
+        var single = Div(Item("대화", "s/0"), Item("쪽지", "s/1"), Item("영상회의", "s/2"));
+        Assert.Equal("s/0", FriendActions.MenuItem(single, ["단체 대화", "단체대화", "대화"])!.Path);
+        Assert.Equal("s/1", FriendActions.MenuItem(single, ["단체 쪽지", "단체쪽지", "쪽지"])!.Path);
+        // 단체 메뉴가 있으면 같은 글자가 들어 있어도 '단체' 이름을 먼저 고른다.
+        Assert.Equal("m/0", FriendActions.MenuItem(Div(Item("대화", "x/0"), menu), ["단체 대화", "대화"])!.Path);
     }
 
     [Fact]

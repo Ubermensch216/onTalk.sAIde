@@ -18,7 +18,7 @@ public sealed class HomePane : UserControl, IDisposable
     private readonly ComboBox _groups = new(), _friends = new();
     private readonly StackPanel _body = new(), _periods = new() { Orientation = Orientation.Horizontal };
     private readonly TextBlock _scope = new(), _chosen = new(), _groupStatus = new();
-    private readonly Button _groupChat = new() { Content = "단체 대화 열기" }, _groupNote = new() { Content = "선택 친구에게 쪽지 보내기" };
+    private readonly Button _groupChat = new() { Content = "대화" }, _groupNote = new() { Content = "쪽지" };
     private bool _opening;
     private readonly ScrollViewer _scroll;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(10) };
@@ -100,7 +100,7 @@ public sealed class HomePane : UserControl, IDisposable
         if (active && !_disposed) { if (changed) Render(); _timer.Start(); }
         else { _timer.Stop(); _detailWindow?.Close(); }
     }
-    public void Dispose() { if (_disposed) return; _disposed = true; _active = false; _timer.Stop(); _detailWindow?.Close(); IsEnabled = false; }
+    public void Dispose() { if (_disposed) return; _disposed = true; _active = false; _timer.Stop(); _groupStatusTimer.Stop(); _detailWindow?.Close(); IsEnabled = false; }
 
     /// <summary>온톡 친구 목록에서 체크한 친구. 그룹 체크는 펼쳐 읽은 구성원만 센다.</summary>
     public IReadOnlyList<ContactPerson> CheckedPeople => _snapshot.People.Where(p => _snapshot.SelectedKeys.Contains(p.Key)).ToList();
@@ -114,25 +114,46 @@ public sealed class HomePane : UserControl, IDisposable
         buttons.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
         buttons.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
         _groupChat.Style = (Style)FindResource("PrimaryButton"); _groupChat.Margin = new Thickness(0, 0, 4, 0);
-        _groupNote.Margin = new Thickness(4, 0, 0, 0); Grid.SetColumn(_groupNote, 1);
-        _groupChat.ToolTip = "온톡에서 체크한 친구를 우클릭해 ‘단체 대화’를 엽니다.";
+        _groupNote.Style = (Style)FindResource("PrimaryButton"); _groupNote.Margin = new Thickness(4, 0, 0, 0); Grid.SetColumn(_groupNote, 1);
+        _groupChat.ToolTip = "온톡에서 체크한 친구를 우클릭해 ‘대화’(여러 명이면 ‘단체 대화’)를 엽니다.";
         _groupNote.ToolTip = "온톡에서 체크한 친구를 받는 사람으로 넣어 쪽지 보내기 창을 엽니다.";
         _groupChat.Click += async (_, _) => await OpenGroup(GroupOpenKind.Chat);
         _groupNote.Click += async (_, _) => await OpenGroup(GroupOpenKind.Note);
         buttons.Children.Add(_groupChat); buttons.Children.Add(_groupNote); content.Children.Add(buttons);
-        _groupStatus.Style = (Style)FindResource("Caption"); _groupStatus.TextWrapping = TextWrapping.Wrap; content.Children.Add(_groupStatus);
+        // 단추와 간격을 두고, 안내 문구는 화면 글자와 다른 색으로 잠깐만 보여 준다.
+        _groupStatus.Style = (Style)FindResource("Caption"); _groupStatus.TextWrapping = TextWrapping.Wrap;
+        _groupStatus.Margin = new Thickness(0, 10, 0, 0); _groupStatus.FontWeight = FontWeights.SemiBold;
+        _groupStatus.Visibility = _groupStatus.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        content.Children.Add(_groupStatus);
         UpdateGroupActions();
         return Card(content);
     }
     private void UpdateGroupActions()
     {
         var people = CheckedPeople;
-        _chosen.Text = people.Count == 0
-            ? "온톡 친구 목록에서 친구나 그룹을 체크하면 여기에 표시됩니다."
-            : $"체크한 친구 {people.Count}명 · " + (people.Count <= 4 ? string.Join(", ", people.Select(p => p.Name))
+        _chosen.Visibility = people.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        _chosen.Text = people.Count == 0 ? "" : $"체크한 친구 {people.Count}명 · " + (people.Count <= 4 ? string.Join(", ", people.Select(p => p.Name))
                 : string.Join(", ", people.Take(4).Select(p => p.Name)) + $" 외 {people.Count - 4}명");
         _groupChat.IsEnabled = _groupNote.IsEnabled = people.Count > 0 && !_opening;
     }
+    // 안내 문구는 잠깐만 보여 준다. 성공은 5초, 직접 해야 할 일이 있는 실패 안내는 읽을 시간을 더 준다.
+    private readonly DispatcherTimer _groupStatusTimer = new();
+    private void ShowGroupStatus(string text, string brush, TimeSpan? visibleFor = null)
+    {
+        _groupStatusTimer.Stop();
+        _groupStatus.Text = text; _groupStatus.Foreground = Brush(brush);
+        _groupStatus.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (visibleFor is not { } span) return;
+        _groupStatusTimer.Interval = span;
+        _groupStatusTimer.Tick -= ClearGroupStatus; _groupStatusTimer.Tick += ClearGroupStatus;
+        _groupStatusTimer.Start();
+    }
+    private void ClearGroupStatus(object? sender, EventArgs e)
+    {
+        _groupStatusTimer.Stop();
+        _groupStatus.Text = ""; _groupStatus.Visibility = Visibility.Collapsed;
+    }
+
     private async Task OpenGroup(GroupOpenKind kind)
     {
         var checkedPeople = CheckedPeople;
@@ -140,25 +161,27 @@ public sealed class HomePane : UserControl, IDisposable
         if (kind == GroupOpenKind.Note && _openNote is not null)
         {
             _openNote(new ContactPreparation(checkedPeople, "온톡 친구 선택 · " + _snapshot.Coverage, _snapshot.ObservedAt));
-            _groupStatus.Text = $"체크한 친구 {checkedPeople.Count}명에게 보낼 쪽지 창을 열었습니다.";
+            ShowGroupStatus("", "AccentText");
             return;
         }
         _opening = true; UpdateGroupActions();
-        var label = kind == GroupOpenKind.Chat ? "단체 대화" : "단체 쪽지";
-        _groupStatus.Text = $"온톡에서 {label}를 여는 중입니다…";
+        // 한 명만 체크하면 온톡 메뉴 이름에 '단체'가 붙지 않으므로 안내에도 쓰지 않는다.
+        var label = kind == GroupOpenKind.Chat ? "대화" : "쪽지";
+        ShowGroupStatus($"온톡에서 {label}를 여는 중입니다…", "Muted");
         try
         {
             var status = await Task.Run(() => FriendActions.OpenGroup(kind));
-            _groupStatus.Text = status switch
+            var (text, ok) = status switch
             {
-                GroupOpenStatus.Opened => kind == GroupOpenKind.Chat ? "단체 대화창을 열었습니다. 대화 상대를 확인하세요."
-                    : "단체 쪽지 작성 창을 열었습니다. 받는 사람을 확인하고 작성하세요.",
-                GroupOpenStatus.NotFriends => "온톡 본창의 친구 화면을 찾지 못했습니다. 온톡에서 친구 메뉴를 열어 두세요.",
-                GroupOpenStatus.NoSelection => "화면에 보이는 체크한 친구를 찾지 못했습니다. 온톡에서 친구를 체크한 뒤 다시 누르세요.",
-                GroupOpenStatus.Covered => "온톡 친구 목록이 가려져 있거나 Ctrl·Shift 키가 눌려 있습니다. 온톡 창을 보이게 한 뒤 다시 누르세요.",
-                GroupOpenStatus.MenuNotFound => $"우클릭 메뉴에서 ‘{label}’를 찾지 못했습니다. 온톡에서 체크한 친구를 직접 우클릭해 ‘{label}’를 누르세요.",
-                _ => $"‘{label}’를 눌렀지만 새 창을 확인하지 못했습니다. 온톡 화면을 확인하세요.",
+                GroupOpenStatus.Opened => (kind == GroupOpenKind.Chat ? "대화창을 열었습니다. 대화 상대를 확인하세요."
+                    : "쪽지 작성 창을 열었습니다. 받는 사람을 확인하고 작성하세요.", true),
+                GroupOpenStatus.NotFriends => ("온톡 본창의 친구 화면을 찾지 못했습니다. 온톡에서 친구 메뉴를 열어 두세요.", false),
+                GroupOpenStatus.NoSelection => ("화면에 보이는 체크한 친구를 찾지 못했습니다. 온톡에서 친구를 체크한 뒤 다시 누르세요.", false),
+                GroupOpenStatus.Covered => ("온톡 친구 목록이 가려져 있거나 Ctrl·Shift 키가 눌려 있습니다. 온톡 창을 보이게 한 뒤 다시 누르세요.", false),
+                GroupOpenStatus.MenuNotFound => ($"우클릭 메뉴에서 ‘{label}’를 찾지 못했습니다. 온톡에서 체크한 친구를 직접 우클릭해 ‘{label}’를 누르세요.", false),
+                _ => ($"‘{label}’를 눌렀지만 새 창을 확인하지 못했습니다. 온톡 화면을 확인하세요.", false),
             };
+            ShowGroupStatus(text, ok ? "Success" : "Warn", TimeSpan.FromSeconds(ok ? 5 : 10));
         }
         finally { _opening = false; UpdateGroupActions(); }
     }

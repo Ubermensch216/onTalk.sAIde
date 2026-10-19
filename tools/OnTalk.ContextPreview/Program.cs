@@ -125,6 +125,17 @@ internal static class Program
         contacts.Refresh(organization with { SelectedKeys=["B"] });
         if (contacts.Chosen.Single().Key != "B") throw new InvalidOperationException("같은 목록에서 바뀐 선택이 반영되지 않았습니다.");
         contacts.Refresh(organization with { SelectedKeys=["A","B"] });
+        var allowed = (HashSet<string>)Get(contacts,"_presenceAllowed");
+        var presenceChecks = ((WrapPanel)Get(contacts,"_presenceRow")).Children.OfType<CheckBox>().ToList();
+        void SetPresence(string only) { foreach (var c in presenceChecks) { c.IsChecked = (string)c.Content == only; c.RaiseEvent(click); } }
+        SetPresence("온라인");
+        if (contacts.Chosen.Single().Key != "A") throw new InvalidOperationException("온라인 필터가 반영되지 않았습니다.");
+        SetPresence("오프라인");
+        if (contacts.Chosen.Single().Key != "B") throw new InvalidOperationException("오프라인 필터가 반영되지 않았습니다.");
+        SetPresence("자리비움");
+        if (contacts.Chosen.Count != 0) throw new InvalidOperationException("자리비움 필터에 다른 상태가 포함됐습니다.");
+        foreach (var c in presenceChecks) { c.IsChecked = true; c.RaiseEvent(click); }
+        if (contacts.Chosen.Count != 2 || allowed.Count != 5) throw new InvalidOperationException("상태 필터 해제가 반영되지 않았습니다.");
         var rows = (StackPanel)Get(contacts,"_rows");
         ((Button)((DockPanel)rows.Children[0]).Children[0]).RaiseEvent(click);
         if (contacts.Chosen.Single().Key != "B") throw new InvalidOperationException("개별 제외가 반영되지 않았습니다.");

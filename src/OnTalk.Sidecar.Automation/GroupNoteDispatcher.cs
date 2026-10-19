@@ -34,8 +34,13 @@ public static class GroupNoteDispatcher
         IDispatchLog log,
         IPersonalizedAutomation automation,
         Action<int, int, string>? onProgress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? attachments = null,
+        bool sms = false)
     {
+        attachments ??= [];
+        if (NoteAttachments.Validate(attachments) is { } attachProblem)
+            return Task.FromResult(new GroupNoteOutcome(GroupNoteResult.Stopped, false, 0, attachProblem));
         if (people.Count == 0)
             return Task.FromResult(new GroupNoteOutcome(GroupNoteResult.Stopped, false, 0, "받는 사람이 없습니다."));
         if (people.GroupBy(p => p.DisplayIdentity).Any(g => g.Count() > 1))
@@ -45,7 +50,7 @@ public static class GroupNoteDispatcher
         if (string.IsNullOrWhiteSpace(final) || NoteBytes.Count(final) > NoteBytes.Limit)
             return Task.FromResult(new GroupNoteOutcome(GroupNoteResult.Stopped, false, 0, "본문이 비어 있거나 4000바이트를 넘습니다."));
         if (reservation is { } r) reservation = new DateTime(r.Year, r.Month, r.Day, r.Hour, r.Minute, 0);
-        return Task.Run(() => Execute(people, final, reservation, send, log, automation, onProgress, cancellationToken));
+        return Task.Run(() => Execute(people, final, reservation, send, log, automation, onProgress, cancellationToken, attachments, sms));
     }
 
     private static GroupNoteOutcome Execute(
@@ -56,7 +61,9 @@ public static class GroupNoteDispatcher
         IDispatchLog log,
         IPersonalizedAutomation automation,
         Action<int, int, string>? onProgress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<string> attachments,
+        bool sms)
     {
         var total = people.Count;
         GroupNoteOutcome Stop(int added, string message) => new(GroupNoteResult.Stopped, false, added, message);
@@ -103,6 +110,28 @@ public static class GroupNoteDispatcher
         if (apply.Status != ApplyStatus.Applied)
             return Stop(names.Count, $"본문을 반영하지 못해 멈췄습니다({ExplainApply(apply.Status)}). 보내지 않았습니다.");
 
+        // 파일은 온톡의 파일 선택창으로 직접 붙이고, 붙일 때마다 첨부 목록에 그 이름이 늘었는지 확인한다.
+        var attachedNames = new List<string>();
+        for (var i = 0; i < attachments.Count; i++)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                return Stop(names.Count, $"사용자 요청으로 멈췄습니다. 온톡 쪽지 창에 첨부 {attachedNames.Count}개까지 붙어 있고 보내지 않았습니다.");
+            var file = Path.GetFileName(attachments[i]);
+            onProgress?.Invoke(total, total, $"첨부 {i + 1}/{attachments.Count} · {file} 붙이는 중...");
+            var attach = automation.AttachFile(hwnd, attachments[i]);
+            if (attach != ActionStatus.Ok)
+                return Stop(names.Count, $"첨부 ‘{file}’을(를) 붙이지 못해 멈췄습니다({ExplainAction(attach)}). 온톡이 용량·개수·형식을 거절했을 수 있습니다. 보내지 않았습니다.");
+            attachedNames.Add(file);
+        }
+
+        if (sms)
+        {
+            onProgress?.Invoke(total, total, "SMS 발송을 선택하는 중...");
+            var smsStatus = automation.SetSms(hwnd, true);
+            if (smsStatus != ActionStatus.Ok)
+                return Stop(names.Count, $"SMS 발송을 선택하지 못해 멈췄습니다({ExplainAction(smsStatus)}). 보내지 않았습니다.");
+        }
+
         if (reservation is { } when)
         {
             var reserve = automation.SetReservation(hwnd, when);
@@ -111,14 +140,14 @@ public static class GroupNoteDispatcher
         }
 
         var state = automation.ReadCompose(hwnd);
-        var expected = new ExpectedCompose(names, body, reservation, false);
+        var expected = new ExpectedCompose(names, body, reservation, sms, attachedNames);
         var diff = state is null ? "온톡 작성 창을 읽지 못했습니다." : ComposeActions.Difference(state, expected);
         if (state is null || diff is not null)
             return Stop(names.Count, $"전송 전 검증이 맞지 않아 멈췄습니다({diff}). 보내지 않았습니다.");
 
         if (!send)
             return new GroupNoteOutcome(GroupNoteResult.Prepared, false, names.Count,
-                $"온톡 쪽지 창에 {names.Count}명과 본문{(reservation is { } at ? $"·예약({at:MM-dd HH:mm})" : "")}을 채웠습니다. 온톡 창에서 확인한 뒤 직접 전송하세요.");
+                $"온톡 쪽지 창에 {names.Count}명과 본문{Extras(attachedNames.Count, sms)}{(reservation is { } at ? $"·예약({at:MM-dd HH:mm})" : "")}을 채웠습니다. 온톡 창에서 확인한 뒤 직접 전송하세요.");
         if (cancellationToken.IsCancellationRequested)
             return Stop(names.Count, "사용자 요청으로 전송 직전에 멈췄습니다. 온톡 쪽지 창은 채워진 채로 남아 있습니다.");
 
@@ -131,8 +160,8 @@ public static class GroupNoteDispatcher
             case SendStatus.WindowClosed:
                 log.FinishDispatch(dispatchId, DispatchStatus.WindowClosed, "");
                 return new GroupNoteOutcome(GroupNoteResult.Sent, true, names.Count, reservation is { } at
-                    ? $"{names.Count}명에게 {at:yyyy-MM-dd HH:mm} 예약 발송을 설정했습니다."
-                    : $"{names.Count}명에게 쪽지를 보냈습니다.");
+                    ? $"{names.Count}명에게 {at:yyyy-MM-dd HH:mm} 예약 발송을 설정했습니다{Extras(attachedNames.Count, sms, " (", ")")}."
+                    : $"{names.Count}명에게 쪽지를 보냈습니다{Extras(attachedNames.Count, sms, " (", ")")}.");
             case SendStatus.StillOpen:
                 log.FinishDispatch(dispatchId, DispatchStatus.StillOpen, outcome.Detail);
                 return new GroupNoteOutcome(GroupNoteResult.Uncertain, true, names.Count,
@@ -142,6 +171,15 @@ public static class GroupNoteDispatcher
                 return new GroupNoteOutcome(GroupNoteResult.Uncertain, true, names.Count,
                     $"전송하지 못했습니다({outcome.Detail}). 온톡 쪽지 창과 보낸 쪽지함을 확인하세요.");
         }
+    }
+
+    // 첨부·SMS를 쓴 경우에만 결과 문장에 덧붙인다.
+    private static string Extras(int attachments, bool sms, string open = "·", string close = "")
+    {
+        var parts = new List<string>();
+        if (attachments > 0) parts.Add($"첨부 {attachments}개");
+        if (sms) parts.Add("SMS 발송");
+        return parts.Count == 0 ? "" : open + string.Join("·", parts) + close;
     }
 
     private static string ExplainAction(ActionStatus status) => status switch

@@ -90,6 +90,50 @@ public static class Win32
     [DllImport("user32.dll")]
     internal static extern bool PostMessageW(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
 
+    internal const uint WM_SETTEXT = 0x000C;
+    internal const uint WM_GETTEXT = 0x000D;
+    internal const uint WM_GETTEXTLENGTH = 0x000E;
+    internal const uint BM_CLICK = 0x00F5;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    internal static extern IntPtr FindWindowExW(IntPtr parent, IntPtr after, string? className, string? title);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    internal static extern IntPtr SendMessageTimeoutW(
+        IntPtr hwnd, uint msg, IntPtr wParam, string lParam, uint flags, uint timeoutMs, out IntPtr result);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    internal static extern IntPtr SendMessageTimeoutW(
+        IntPtr hwnd, uint msg, IntPtr wParam, StringBuilder lParam, uint flags, uint timeoutMs, out IntPtr result);
+
+    /// <summary>같은 프로세스가 만든 보이는 최상위 창 가운데 클래스가 <paramref name="className"/>인 것(예: 파일 선택창 "#32770").</summary>
+    internal static List<IntPtr> VisibleTopLevelWindows(IEnumerable<uint> pids, string className)
+    {
+        var set = pids.ToHashSet();
+        var found = new List<IntPtr>();
+        EnumWindows((hwnd, _) =>
+        {
+            GetWindowThreadProcessId(hwnd, out var pid);
+            if (set.Contains(pid) && IsWindowVisible(hwnd) && ClassName(hwnd) == className) found.Add(hwnd);
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    internal static string WindowText(IntPtr hwnd)
+    {
+        var sb = new StringBuilder(1024);
+        SendMessageTimeoutW(hwnd, WM_GETTEXT, new IntPtr(sb.Capacity), sb, SMTO_ABORTIFHUNG, 1000, out _);
+        return sb.ToString();
+    }
+
+    internal static List<(IntPtr Hwnd, string Class, string Text)> ChildWindows(IntPtr parent)
+    {
+        var list = new List<(IntPtr, string, string)>();
+        EnumChildWindows(parent, (child, _) => { list.Add((child, ClassName(child), WindowText(child))); return true; }, IntPtr.Zero);
+        return list;
+    }
+
     [DllImport("oleacc.dll")]
     internal static extern int AccessibleObjectFromWindow(
         IntPtr hwnd, uint objectId, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out object? acc);

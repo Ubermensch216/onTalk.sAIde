@@ -32,7 +32,11 @@ public sealed record ComposeState(
     bool SmsChecked,
     bool DialogOpen,
     AccBounds BodyBounds,
-    DateTime? Reservation = null);
+    DateTime? Reservation = null)
+{
+    /// <summary>온톡 작성 창의 "첨부 파일" 목록에 보이는 파일 이름(붙인 순서).</summary>
+    public IReadOnlyList<string> Attachments { get; init; } = [];
+}
 
 /// <summary>
 /// 온톡 5.4.3 쪽지 창(windows/note/app.html)의 접근성 트리를 해석한다.
@@ -44,6 +48,8 @@ public static class NoteWindowParser
     private static readonly string[] ModeToggles = ["싱글창", "멀티창"];
     // 수신자가 없을 때 이름 자리에 나오는 안내 문구.
     private const string NoRecipientHint = "받는 사람을 추가해주세요.";
+    // 첨부가 없을 때 파일 이름 자리에 나오는 안내 문구.
+    private const string NoAttachmentHint = "첨부파일을 추가해주세요.";
 
     public static bool IsNotePage(AccNode root) =>
         root.Role == AccNode.Document && root.Value.Contains("/windows/note/", StringComparison.OrdinalIgnoreCase);
@@ -100,7 +106,30 @@ public static class NoteWindowParser
             nodes.Any(n => n.Role == AccNode.StaticText && n.Name == "예약 전송 일시"),
             body.Bounds,
             nodes.Where(n => n.Role == AccNode.StaticText).Select(n => ReservationTime.ParseCompose(n.Name))
-                .FirstOrDefault(t => t is not null));
+                .FirstOrDefault(t => t is not null))
+        {
+            Attachments = ParseAttachments(nodes, bodyIndex),
+        };
+    }
+
+    // "첨부 파일" 줄은 [첨부 파일, (개수), 추가] 다음에 파일 이름이 나오고, "* 첨부파일 용량…" 안내나 "예약 전송" 줄에서 끝난다.
+    private static IReadOnlyList<string> ParseAttachments(List<AccNode> nodes, int bodyIndex)
+    {
+        var label = nodes.FindIndex(bodyIndex, n => n.Role == AccNode.StaticText && n.Name == "첨부 파일");
+        if (label < 0) return [];
+        var add = nodes.FindIndex(label + 1, n => n.Role == AccNode.StaticText && n.Name == "추가");
+        if (add < 0) return [];
+        var names = new List<string>();
+        foreach (var node in nodes.Skip(add + 1))
+        {
+            if (node.Role != AccNode.StaticText) continue;
+            var text = node.Name.Trim();
+            if (text.Length == 0) continue;
+            if (text.StartsWith('*') || text == "예약 전송") break;
+            if (text == NoAttachmentHint) continue;
+            names.Add(text);
+        }
+        return names;
     }
 
     private static ReceivedNote? ParseReceived(AccNode root, DateTimeOffset now)

@@ -259,7 +259,7 @@ public partial class ComposeWindow
         }
         if (_closed || !CheckPersonalizedTarget(state)) return;
         // 확인 창에는 초안이 아니라 지금 온톡 창에 실제로 들어 있는 내용을 보여 준다.
-        var expected = new ExpectedCompose(state.Recipients, final, state.Reservation, state.SmsChecked);
+        var expected = new ExpectedCompose(state.Recipients, final, state.Reservation, state.SmsChecked, state.Attachments);
         if (ComposeActions.Difference(state, expected) is { } problem)
         {
             Result($"보내지 않았습니다. {problem}", ok: false);

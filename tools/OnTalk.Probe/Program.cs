@@ -497,6 +497,63 @@ switch (command)
         InputInjector.Tap(main.Hwnd, InputInjector.KeyEscape);
         return 0;
     }
+    case "composeopen":
+    {
+        // 빈 '새 쪽지' 창을 확보하고 hwnd를 출력한다. 아무것도 채우거나 보내지 않는다.
+        var (status, hwnd) = ComposeActions.EnsureEmptyNewComposeWindow();
+        Console.WriteLine($"{status} 0x{hwnd.ToInt64():X8}");
+        return status == ActionStatus.Ok ? 0 : 1;
+    }
+    case "attachfile":
+    {
+        // 작성 창에 파일 하나를 붙인다(--hwnd, --file). 전송하지 않는다.
+        if (hwndArg is null || Option("--file") is not { } file) { Console.WriteLine("--hwnd, --file 필요"); return 2; }
+        var hwnd = new IntPtr(Convert.ToInt64(hwndArg, 16));
+        Console.WriteLine("첨부: " + AttachActions.Attach(hwnd, file));
+        return 0;
+    }
+    case "composeclose":
+    {
+        // 비어 있는 새 쪽지 창만 닫는다.
+        if (hwndArg is null) { Console.WriteLine("--hwnd 필요"); return 2; }
+        ComposeActions.CloseEmptyComposeWindow(new IntPtr(Convert.ToInt64(hwndArg, 16)));
+        return 0;
+    }
+    case "attachremove":
+    {
+        if (hwndArg is null || Option("--name") is not { } fileName) { Console.WriteLine("--hwnd, --name 필요"); return 2; }
+        Console.WriteLine(AttachActions.Remove(new IntPtr(Convert.ToInt64(hwndArg, 16)), fileName));
+        return 0;
+    }
+    case "sms":
+    {
+        if (hwndArg is null) { Console.WriteLine("--hwnd 필요"); return 2; }
+        Console.WriteLine(ComposeActions.SetSms(new IntPtr(Convert.ToInt64(hwndArg, 16)), args.Contains("--on")));
+        return 0;
+    }
+    case "composestate":
+    {
+        if (hwndArg is null) { Console.WriteLine("--hwnd 필요"); return 2; }
+        var st = ComposeWriter.Read(new IntPtr(Convert.ToInt64(hwndArg, 16)));
+        Console.WriteLine(st is null ? "읽지 못함" : $"수신 {st.Recipients.Count}, 본문 {st.Body.Length}자, SMS={st.SmsChecked}, 첨부=[{string.Join(", ", st.Attachments)}]");
+        return 0;
+    }
+    case "attachopen":
+    {
+        // 작성 창의 첨부 '추가'를 눌러 파일 선택창을 열고 구조를 출력한다. 파일은 고르지 않는다.
+        if (hwndArg is null) { Console.WriteLine("--hwnd 필요"); return 2; }
+        var hwnd = new IntPtr(Convert.ToInt64(hwndArg, 16));
+        var dialog = AttachActions.OpenPicker(hwnd);
+        Console.WriteLine($"dialog 0x{dialog.ToInt64():X8} class={(dialog == IntPtr.Zero ? "" : Win32.ClassName(dialog))}");
+        if (dialog != IntPtr.Zero)
+        {
+            Win32.GetWindowThreadProcessId(dialog, out var dpid);
+            Console.WriteLine($"pid={dpid} owner? text='{Win32.WindowText(dialog)}'");
+            foreach (var (h, cls, text) in AttachActions.Describe(dialog))
+                Console.WriteLine($"  0x{h.ToInt64():X8} {cls} '{text}'");
+        }
+        return dialog == IntPtr.Zero ? 1 : 0;
+    }
     case "tree":
         if (hwndArg is null)
         {

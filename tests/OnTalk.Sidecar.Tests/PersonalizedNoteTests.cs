@@ -43,6 +43,15 @@ public sealed class PersonalizedNoteTests
     public void 조직_전체_이름으로_수신자를_대조한다(string detail, bool expected) =>
         Assert.Equal(expected, PreparedRecipientMatch.Matches(Person(), new("김예시", "주무관", [detail])));
 
+    [Theory]
+    [InlineData("부산광역시 / 사하구 / 자치행정국 / 민원여권과", true)]
+    [InlineData("부산광역시 / 영도구 / 자치행정국 / 민원여권과", false)]
+    [InlineData("부산광역시 / 사하구 / 자치행정국 / 민원여권과지원팀", false)]
+    public void 공백으로_이어_붙인_친구목록_소속도_검색결과의_단계별_소속과_대조한다(string detail, bool expected) =>
+        Assert.Equal(expected, PreparedRecipientMatch.Matches(
+            new ContactPerson("k", "박경수", "지방행정서기(일반임기제)/주무관", ["부산광역시 사하구", "민원여권과"]),
+            new("박경수", "지방행정서기(일반임기제)/주무관", ["부산광역시", detail, "051-220-4292"])));
+
     [Fact]
     public void 저장후_복구와_계정격리와_오래된_편집기의_발송기록_보존()
     {

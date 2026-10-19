@@ -153,6 +153,25 @@ public sealed class GroupNoteTests
             return ActionStatus.Ok;
         }
 
+        public List<string> AttachedPaths { get; } = [];
+        public ActionStatus AttachResult { get; set; } = ActionStatus.Ok;
+        public bool? SmsRequested { get; private set; }
+
+        public ActionStatus AttachFile(IntPtr compose, string path)
+        {
+            if (AttachResult != ActionStatus.Ok) return AttachResult;
+            AttachedPaths.Add(path);
+            _state = _state with { Attachments = [.. _state.Attachments, Path.GetFileName(path)] };
+            return ActionStatus.Ok;
+        }
+
+        public ActionStatus SetSms(IntPtr compose, bool on)
+        {
+            SmsRequested = on;
+            _state = _state with { SmsChecked = on };
+            return ActionStatus.Ok;
+        }
+
         public SendOutcome Send(IntPtr compose, ExpectedCompose expected)
         {
             SendCount++;

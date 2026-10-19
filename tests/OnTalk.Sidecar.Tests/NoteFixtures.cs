@@ -42,6 +42,31 @@ internal static class NoteFixtures
             Div(Div(Div(parts.ToArray()))));
     }
 
+    /// <summary>온톡 5.4.3 새 쪽지 창에서 관측한 첨부 영역(첨부 파일 · 개수 · 추가 · 파일 이름들 · 안내)을 재현한다.</summary>
+    public static AccNode ComposeWithAttachments(string title, params string[] files)
+    {
+        var attach = new List<AccNode>
+        {
+            Div(Text("첨부 파일")),
+        };
+        if (files.Length > 0) attach.Add(Div(Text(files.Length.ToString())));
+        attach.Add(new AccNode(AccNode.EditableText, "", "", 0, [Text("추가")]));
+        attach.Add(files.Length == 0
+            ? Div(Text("첨부파일을 추가해주세요."))
+            : Div(files.Select(f => Div(Div(Text(f)), Div())).ToArray()));
+        return Document(NoteUrl,
+            Div(Text(title)),
+            Div(Div(
+                Div(Text("수신"), Div(Text("1")), Div(Text("추가"))),
+                Div(Div(Text("김철수"))),
+                new AccNode(AccNode.EditableText, "쪽지 내용을 입력해주세요.", "", 0, []),
+                Div(Text("0/4000 Bytes")),
+                Div(Div(attach.ToArray()),
+                    Div(Text("* 첨부파일 용량은 최대 20MB, 최대 10개 발송 가능 (exe파일 첨부 불가)")),
+                    Div(Div(Div(Text("예약 전송")), Div(Text("설정"))))),
+                Div(Div(Text("전송")), Div(Text("(Alt+S)"))))));
+    }
+
     public static AccNode Compose(string title) => Document(NoteUrl,
         Div(Text(title)),
         Div(Div(
