@@ -53,7 +53,7 @@ public partial class PanelWindow
         ContextHeader.Visibility = Visibility.Visible;
         ContextTitle.Text = guide.Title;
         WindowSubtitle.Text = guide.Title;
-        ComposeButton.ToolTip = context.Surface == OnTalkSurface.NoteCompose ? "확장 작성 도우미" : "새 초안";
+        ComposeButton.ToolTip = "새 쪽지";
         ContextHint.Text = current.Context.Menu == MainMenu.Unknown && context.Menu != MainMenu.Unknown
             ? "수동으로 지정한 메뉴 · 온톡 선택 대상은 변경하지 않습니다."
             : "현재 부착된 온톡 창의 작업";
@@ -86,7 +86,7 @@ public partial class PanelWindow
             if (!ReferenceEquals(_activePane, pane)) _activePane?.SetActive(false);
             _activePane = pane;
             pane.Refresh(state);
-            pane.SetActive(_composeWindow?.BoundSession != current.SessionId);
+            pane.SetActive(true);
             ComposeHost.Content = pane;
             EmptyState.Visibility = ContextView.Visibility = NoteView.Visibility = Visibility.Collapsed;
             ComposeHost.Visibility = Visibility.Visible;
@@ -120,7 +120,7 @@ public partial class PanelWindow
         }
         if (context.Surface == OnTalkSurface.Main && context.Menu == MainMenu.Friends)
         {
-            _homePane ??= new HomePane(_store, () => OnOpenTasks(this, new RoutedEventArgs()));
+            _homePane ??= new HomePane(_store, () => OnOpenTasks(this, new RoutedEventArgs()), preparation => OpenCompose(null, preparation: preparation));
             _homePane.Refresh(current.People ?? new PeopleSnapshot(MainMenu.Friends, [], [], [], DateTimeOffset.Now));
             _homePane.SetActive(true);
             PeopleHost.Content = _homePane;
@@ -154,7 +154,7 @@ public partial class PanelWindow
         ContextScope.Text = guide.Scope;
         var canPrepare = context.Surface == OnTalkSurface.Main && context.Menu == MainMenu.Notes;
         ContextPrimary.Visibility = canPrepare ? Visibility.Visible : Visibility.Collapsed;
-        ContextPrimary.Content = "새 쪽지 준비";
+        ContextPrimary.Content = "새 쪽지";
         ContextSearch.Visibility = context.Surface == OnTalkSurface.Main ? Visibility.Visible : Visibility.Collapsed;
     }
 

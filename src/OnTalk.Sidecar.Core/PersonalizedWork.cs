@@ -150,9 +150,14 @@ public sealed class PersonalizedWorkItem
     }
 }
 
-public interface IPersonalizedDispatchStore
+/// <summary>전송 시도 기록. 전송 단추를 누르기 전에 시작을 남기고, 결과를 확인한 뒤 끝을 남긴다.</summary>
+public interface IDispatchLog
 {
-    void SavePersonalizedWork(PersonalizedWork work);
     long BeginDispatch(IReadOnlyList<string> recipientNames, string body, DateTime? reserveAt, DateTimeOffset at);
     void FinishDispatch(long id, DispatchStatus status, string detail);
+}
+
+public interface IPersonalizedDispatchStore : IDispatchLog
+{
+    void SavePersonalizedWork(PersonalizedWork work);
 }

@@ -14,10 +14,11 @@ public sealed class HomePane : UserControl, IDisposable
 {
     private readonly ProfileStore _store;
     private readonly Action _openTasks;
+    private readonly Action<ContactPreparation>? _openNote;
     private readonly ComboBox _groups = new(), _friends = new();
     private readonly StackPanel _body = new(), _periods = new() { Orientation = Orientation.Horizontal };
-    private readonly TextBlock _coverage = new(), _scope = new(), _chosen = new(), _groupStatus = new();
-    private readonly Button _groupChat = new() { Content = "단체 대화 열기" }, _groupNote = new() { Content = "단체 쪽지 열기" };
+    private readonly TextBlock _scope = new(), _chosen = new(), _groupStatus = new();
+    private readonly Button _groupChat = new() { Content = "단체 대화 열기" }, _groupNote = new() { Content = "선택 친구에게 쪽지 보내기" };
     private bool _opening;
     private readonly ScrollViewer _scroll;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(10) };
@@ -33,9 +34,9 @@ public sealed class HomePane : UserControl, IDisposable
     private IReadOnlyList<ContactPerson> GroupPeople => _snapshot.People.Where(p => _groupKey is null ||
         _snapshot.Scopes.Any(s => s.Key == _groupKey && s.MemberKeys.Contains(p.Key))).ToList();
 
-    public HomePane(ProfileStore store, Action openTasks)
+    public HomePane(ProfileStore store, Action openTasks, Action<ContactPreparation>? openNote = null)
     {
-        (_store, _openTasks) = (store, openTasks);
+        (_store, _openTasks, _openNote) = (store, openTasks, openNote);
         Background = Brush("PageBg"); Foreground = Brush("TextStrong"); FontFamily = new FontFamily("Malgun Gothic"); FontSize = 13;
         var root = new StackPanel { Margin = new Thickness(12) };
         root.Children.Add(Text("그룹별 소통 정리", "PageTitle"));
@@ -53,8 +54,6 @@ public sealed class HomePane : UserControl, IDisposable
         DockPanel.SetDock(basis, Dock.Right); periodRow.Children.Add(basis); periodRow.Children.Add(_periods); root.Children.Add(periodRow);
         _scope.Style = (Style)FindResource("Caption"); root.Children.Add(_scope);
         root.Children.Add(_body);
-        _coverage.Style = (Style)FindResource("Caption"); _coverage.Margin = new Thickness(2, 6, 2, 12);
-        root.Children.Add(_coverage);
         _scroll = new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         Content = _scroll;
         _groups.SelectionChanged += (_, _) =>
@@ -117,7 +116,7 @@ public sealed class HomePane : UserControl, IDisposable
         _groupChat.Style = (Style)FindResource("PrimaryButton"); _groupChat.Margin = new Thickness(0, 0, 4, 0);
         _groupNote.Margin = new Thickness(4, 0, 0, 0); Grid.SetColumn(_groupNote, 1);
         _groupChat.ToolTip = "온톡에서 체크한 친구를 우클릭해 ‘단체 대화’를 엽니다.";
-        _groupNote.ToolTip = "온톡에서 체크한 친구를 우클릭해 ‘단체 쪽지’ 작성 창을 엽니다.";
+        _groupNote.ToolTip = "온톡에서 체크한 친구를 받는 사람으로 넣어 쪽지 보내기 창을 엽니다.";
         _groupChat.Click += async (_, _) => await OpenGroup(GroupOpenKind.Chat);
         _groupNote.Click += async (_, _) => await OpenGroup(GroupOpenKind.Note);
         buttons.Children.Add(_groupChat); buttons.Children.Add(_groupNote); content.Children.Add(buttons);
@@ -136,7 +135,14 @@ public sealed class HomePane : UserControl, IDisposable
     }
     private async Task OpenGroup(GroupOpenKind kind)
     {
-        if (_disposed || !_active || _opening || CheckedPeople.Count == 0) return;
+        var checkedPeople = CheckedPeople;
+        if (_disposed || !_active || _opening || checkedPeople.Count == 0) return;
+        if (kind == GroupOpenKind.Note && _openNote is not null)
+        {
+            _openNote(new ContactPreparation(checkedPeople, "온톡 친구 선택 · " + _snapshot.Coverage, _snapshot.ObservedAt));
+            _groupStatus.Text = $"체크한 친구 {checkedPeople.Count}명에게 보낼 쪽지 창을 열었습니다.";
+            return;
+        }
         _opening = true; UpdateGroupActions();
         var label = kind == GroupOpenKind.Chat ? "단체 대화" : "단체 쪽지";
         _groupStatus.Text = $"온톡에서 {label}를 여는 중입니다…";
@@ -202,8 +208,6 @@ public sealed class HomePane : UserControl, IDisposable
             ? person.Name + " · " + string.Join(" / ", person.Organization)
             : (scope?.Name ?? "전체 그룹") + $" · 확인한 친구 {people.Select(p => p.DisplayIdentity).Distinct().Count()}명" +
               (scope?.DeclaredCount is { } declared ? $" / 그룹 표시 {declared}명" : "");
-        _coverage.Text = "온톡에서 관찰한 친구·그룹과 이 계정에 보관한 자료만 표시합니다. 접힌 그룹·화면 밖 친구는 포함하지 않습니다.\n" +
-            $"받은 쪽지: 보관일 / 보낸 쪽지: 사이드카 발송 기록 / 대화: 원문 관찰일 기준 · {now.ToOffset(KoreanNoteTime.SeoulOffset):HH:mm} 갱신";
         if (people.Count == 0)
         {
             _body.Children.Add(Card(Text("친구 그룹을 펼쳐 주세요", "SectionTitle"), Text("온톡 Home에서 친구가 표시되면 해당 그룹의 쪽지 발송 이력과 대화 요약을 모아 보여드립니다.", "Small")));
@@ -215,7 +219,7 @@ public sealed class HomePane : UserControl, IDisposable
     }
     private void RenderNotes(IReadOnlyList<RecentNote> notes, GroupHistory history, DateTimeOffset now)
     {
-        var content = new StackPanel(); content.Children.Add(Section("최근 쪽지 · 수신/발신", notes.Count));
+        var content = new StackPanel(); var header = Section("최근 쪽지 · 수신/발신", notes.Count);
         if (notes.Count == 0)
         {
             content.Children.Add(Text(_friendIdentity is null ? "이 그룹과 주고받은 쪽지 기록이 없습니다." : "이 친구와 주고받은 쪽지 기록이 없습니다.", "Body"));
@@ -230,11 +234,7 @@ public sealed class HomePane : UserControl, IDisposable
         }
         foreach (var item in notes.Take(5)) content.Children.Add(NoteRow(item));
         AddMore(content, notes.Skip(5).Select(NoteRow), "이전 쪽지");
-        if (history.Dispatches.Count > 0)
-            content.Children.Add(Text("보낸 쪽지는 이름으로 맞춘 기록이라 동명이인을 구분하지 못합니다." +
-                (history.HasHomonyms ? " 이 범위에 동명이인이 있어 일부 기록이 다른 사람의 것일 수 있습니다." : "") +
-                " ‘전송 단추를 누름’은 상대 도착까지 확인한 것이 아닙니다.", "Caption"));
-        _body.Children.Add(Card(content));
+        _body.Children.Add(Collapsible("notes", header, content));
     }
     private UIElement NoteRow(RecentNote item)
     {
@@ -242,7 +242,7 @@ public sealed class HomePane : UserControl, IDisposable
         var row = new StackPanel { Margin = new Thickness(0, 4, 0, 8) };
         var at = item.At.ToOffset(KoreanNoteTime.SeoulOffset);
         row.Children.Add(Text("받음 · " + item.Counterpart, "SectionTitle"));
-        row.Children.Add(Text(item.Received?.Analysis?.Summary is { Length: > 0 } summary ? summary : Snippet.Make(item.Body, [], 70), "Body"));
+        row.Children.Add(Text(item.Received?.Analysis?.Summary is { Length: > 0 } summary ? Snippet.Brief(summary) : Snippet.Brief(item.Body), "Body"));
         row.Children.Add(Text($"{at:MM.dd HH:mm} · " + (item.Linked ? "친구에 연결한 쪽지" : "발신자 이름 일치 · 연결 전"), "Caption"));
         row.Children.Add(Link("받은 내용 보기 ›", () => ShowReceived(item))); return row;
     }
@@ -260,7 +260,7 @@ public sealed class HomePane : UserControl, IDisposable
         var record = item.Record; var row = new StackPanel { Margin = new Thickness(0, 4, 0, 8) };
         var at = record.CreatedAt.ToOffset(KoreanNoteTime.SeoulOffset);
         row.Children.Add(Text("보냄 · " + RecipientLabel(record), "SectionTitle"));
-        row.Children.Add(Text(Snippet.Make(record.Body, [], 70), "Body"));
+        row.Children.Add(Text(Snippet.Brief(record.Body), "Body"));
         row.Children.Add(Text($"{at:MM.dd HH:mm} · {StatusLabel(record)}", "Caption"));
         row.Children.Add(Link("보낸 내용 보기 ›", () => ShowDispatch(item))); return row;
     }
@@ -288,7 +288,7 @@ public sealed class HomePane : UserControl, IDisposable
         var content = new StackPanel();
         var top = new DockPanel();
         var all = Link("업무 보기 ›", _openTasks); DockPanel.SetDock(all, Dock.Right); top.Children.Add(all);
-        top.Children.Add(Text("최근 업무" + (data.OpenTasks.Count > 0 ? $"  {data.OpenTasks.Count}" : ""), "SectionTitle")); content.Children.Add(top);
+        top.Children.Add(Text("최근 업무" + (data.OpenTasks.Count > 0 ? $"  {data.OpenTasks.Count}" : ""), "SectionTitle"));
         if (data.OpenTasks.Count == 0)
             content.Children.Add(Text("연결한 자료에 등록된 열린 업무가 없습니다.", "Small"));
         foreach (var task in data.OpenTasks.Take(3))
@@ -303,21 +303,20 @@ public sealed class HomePane : UserControl, IDisposable
             row.Children.Add(meta); content.Children.Add(row);
         }
         if (data.OpenTasks.Count > 3) content.Children.Add(Text($"외 {data.OpenTasks.Count - 3}건은 업무 목록에서 확인", "Caption"));
-        _body.Children.Add(Card(content));
+        _body.Children.Add(Collapsible("tasks", top, content));
     }
     private void RenderChats(HomeDashboard data, IReadOnlyList<ContactPerson> people)
     {
-        var content = new StackPanel(); content.Children.Add(Section("최근 대화", data.Chats.Count));
+        var content = new StackPanel(); var header = Section("최근 대화", data.Chats.Count);
         if (data.Chats.Count == 0)
         {
             content.Children.Add(Text("최근에 어떤 이야기를 나눴나요?", "Body"));
-            content.Children.Add(Text("대화창의 ‘정리’에서 원문을 요약하고 친구에게 연결하면, 다음 연락 때 이어갈 맥락이 여기에 남습니다.", "Small"));
         }
         foreach (var chat in data.Chats.Take(3))
         {
             var row = new StackPanel { Margin = new Thickness(0, 2, 0, 8) };
             row.Children.Add(Text(ContactNames(chat.ContactIdentities, people), "SectionTitle"));
-            row.Children.Add(Text(chat.Analysis.Summary, "Body"));
+            row.Children.Add(Text(Snippet.Brief(chat.Analysis.Summary), "Body"));
             row.Children.Add(Text($"AI 요약 · 선택 원문 {chat.Source.Messages.Count}건 · {chat.Source.ObservedAt.ToOffset(KoreanNoteTime.SeoulOffset):MM.dd HH:mm} 관찰", "Caption"));
             foreach (var point in chat.Analysis.Points.Take(1))
                 row.Children.Add(Text((point.Kind switch { "decision" => "결정 후보", "question" => "질문 후보", _ => "요청 후보" }) + " · " + point.Title, "Small"));
@@ -325,7 +324,7 @@ public sealed class HomePane : UserControl, IDisposable
         }
         AddMore(content, data.Chats.Skip(3).Select(chat => Link(ContactNames(chat.ContactIdentities, people) + " · " + chat.Source.RoomHint,
             () => ShowChat(chat, people))), "이전 대화 정리");
-        _body.Children.Add(Card(content));
+        _body.Children.Add(Collapsible("chats", header, content));
     }
     private void ShowChat(HomeChatDigest chat, IReadOnlyList<ContactPerson> people)
     {
@@ -365,6 +364,31 @@ public sealed class HomePane : UserControl, IDisposable
     private TextBlock Text(string value, string style) => new() { Text = value, Style = (Style)FindResource(style), TextWrapping = TextWrapping.Wrap,
         Margin = new Thickness(0, 3, 0, 3) };
     private Brush Brush(string key) => (Brush)FindResource(key);
+    // 홈은 주기적으로 다시 그려지므로 접은 카드는 이름으로 기억한다. 기본은 펼침.
+    private readonly HashSet<string> _collapsed = [];
+    /// <summary>제목 줄 오른쪽 화살표(또는 제목 글)를 누르면 내용을 접고 펼치는 카드.</summary>
+    private Border Collapsible(string key, UIElement header, StackPanel content)
+    {
+        var chevron = new Button
+        {
+            Style = (Style)FindResource("IconButton"), FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 11,
+            Width = 26, Height = 26, ToolTip = "접기/펼치기", Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top,
+        };
+        System.Windows.Automation.AutomationProperties.SetName(chevron, "접기 또는 펼치기");
+        void Apply()
+        {
+            var open = !_collapsed.Contains(key);
+            content.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+            chevron.Content = open ? "" : "";
+        }
+        void Toggle() { if (!_collapsed.Remove(key)) _collapsed.Add(key); Apply(); }
+        chevron.Click += (_, _) => Toggle();
+        if (header is TextBlock title) { title.Cursor = System.Windows.Input.Cursors.Hand; title.MouseLeftButtonUp += (_, _) => Toggle(); }
+        Apply();
+        var bar = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(chevron, Dock.Right); bar.Children.Add(chevron); bar.Children.Add(header);
+        return Card(bar, content);
+    }
     private Border Card(params UIElement[] children)
     {
         var stack = new StackPanel(); foreach (var child in children) stack.Children.Add(child);

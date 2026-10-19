@@ -61,8 +61,8 @@ public partial class PanelWindow : Window
     private long? _analyzingNoteId;
     private TasksWindow? _tasksWindow;
     private SearchWindow? _searchWindow;
-    private ComposeWindow? _composeWindow;
     private PersonalizedWindow? _personalizedWindow;
+    private GroupNoteWindow? _groupNoteWindow;
     private ManageWindow? _manageWindow;
     private string? _onTalkVersion;
     private bool _embedding;
@@ -195,14 +195,6 @@ public partial class PanelWindow : Window
             _saved.Remove(gone);
         }
 
-        _composeWindow?.UpdateTargets(snapshot.Notes
-            .Where(n => n.Content.Compose is not null)
-            .Select(n => new ComposeTarget(n.Hwnd, DescribeTarget(n.Content), n.Content.Compose!)
-            {
-                SessionId = n.SessionId, Kind = n.Content.ComposeKind
-            })
-            .ToList());
-
         var sessions = snapshot.Notes.Select(n => n.SessionId).ToHashSet();
         foreach (var key in _composePanes.Where(p => !sessions.Contains(p.Value.SessionId)).Select(p => p.Key).ToList())
         {
@@ -276,9 +268,10 @@ public partial class PanelWindow : Window
         _analysisCancel?.Cancel();
         _tasksWindow?.Close();
         _searchWindow?.Close();
-        _composeWindow?.Close();
         _personalizedWindow?.Close();
         _personalizedWindow = null;
+        _groupNoteWindow?.Close();
+        _groupNoteWindow = null;
         foreach (var pane in _composePanes.Values) pane.Dispose();
         _composePanes.Clear();
         _activePane = null;
@@ -754,19 +747,7 @@ public partial class PanelWindow : Window
         }
     }
 
-    private void OnNewDraft(object sender, RoutedEventArgs e)
-    {
-        if (_context is { Context.Surface: OnTalkSurface.NoteCompose } current &&
-            _latestSnapshot?.Notes.FirstOrDefault(n => n.Hwnd == current.Hwnd && n.SessionId == current.SessionId) is { Content.Compose: { } state } note)
-        {
-            var target = new ComposeTarget(note.Hwnd, DescribeTarget(note.Content), state)
-            {
-                SessionId = note.SessionId, Kind = note.Content.ComposeKind
-            };
-            OpenCompose(null, target);
-        }
-        else OpenCompose(null);
-    }
+    private void OnNewDraft(object sender, RoutedEventArgs e) => OpenCompose(null);
 
     private void OpenCompose(StoredNote? source, ComposeTarget? target = null, ContactPreparation? preparation = null, bool personalize = false)
     {
@@ -788,25 +769,17 @@ public partial class PanelWindow : Window
             ShowWorkWindow(_personalizedWindow);
             return;
         }
-        // 초안 창은 하나만 둔다. 닫을 때 쓰던 초안이 저장된다.
-        _composeWindow?.Close();
-        var pane = target is not null ? _activePane : null;
-        pane?.SetActive(false);
-        if (pane is not null) pane.IsEnabled = false;
-        var window = _composeWindow = new ComposeWindow(_store, _writer, source, target, pane?.Draft, preparation, personalize) { Owner = this };
-        _composeWindow.Closed += (s, _) =>
+        // 새 쪽지 · 답장 · 선택 직원/친구에게 쪽지 보내기 모두 동일한 쪽지 작업 창(GroupNoteWindow)을 사용한다.
+        _groupNoteWindow?.Close();
+        _groupNoteWindow = new GroupNoteWindow(_store, _writer, preparation, source: source) { Owner = this };
+        _groupNoteWindow.Closed += (s, _) =>
         {
-            if (ReferenceEquals(s, _composeWindow))
+            if (ReferenceEquals(s, _groupNoteWindow))
             {
-                _composeWindow = null;
-            }
-            if (pane is not null)
-            {
-                pane.RestoreDraft(window.Draft, window.Quote, window.QuoteIncluded);
-                pane.IsEnabled = true;
+                _groupNoteWindow = null;
             }
         };
-        ShowWorkWindow(_composeWindow);
+        ShowWorkWindow(_groupNoteWindow);
     }
 
     private void OnOpenSearch(object sender, RoutedEventArgs e)

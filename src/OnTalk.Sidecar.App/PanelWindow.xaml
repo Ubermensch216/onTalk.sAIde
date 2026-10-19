@@ -72,7 +72,7 @@
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button x:Name="ComposeButton" Content="&#xE70F;" Style="{StaticResource OnNavyIconButton}"
-                            Click="OnNewDraft" IsEnabled="False" ToolTip="새 초안" />
+                            Click="OnNewDraft" IsEnabled="False" ToolTip="새 쪽지" />
                     <Button x:Name="SearchButton" Content="&#xE721;" Style="{StaticResource OnNavyIconButton}"
                             Click="OnOpenSearch" IsEnabled="False" ToolTip="검색" />
                     <Button x:Name="TasksButton" Content="&#xE73E;" Style="{StaticResource OnNavyIconButton}"
@@ -172,7 +172,7 @@
                         </StackPanel>
                     </Border>
                     <TextBlock x:Name="ContextScope" Style="{StaticResource Small}" Margin="2,4,2,12" />
-                    <Button x:Name="ContextPrimary" Content="새 쪽지 준비" Style="{StaticResource PrimaryButton}" Click="OnContextPrimary" />
+                    <Button x:Name="ContextPrimary" Content="새 쪽지" Style="{StaticResource PrimaryButton}" Click="OnContextPrimary" />
                     <Button x:Name="ContextSearch" Content="보관한 쪽지에서 찾기" Margin="0,8,0,0" Click="OnOpenSearch" />
                 </StackPanel>
             </ScrollViewer>

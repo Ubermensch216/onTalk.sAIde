@@ -41,4 +41,38 @@ public static partial class DraftText
     /// <summary>아직 채우지 않은 "{이름}" 같은 자리 표시. 남아 있으면 온톡에 반영하지 않는다.</summary>
     public static IReadOnlyList<string> UnfilledPlaceholders(string text) =>
         Placeholder().Matches(text).Select(m => m.Value).Distinct().ToList();
+
+    /// <summary>
+    /// 블럭 지정 범위에 공백·줄바꿈만 있으면 선택하지 않은 것으로 보고, 앞뒤 공백·줄바꿈은 범위에서 제외한다.
+    /// </summary>
+    public static bool TryTrimSelection(string text, int selectionStart, int selectionLength, out int start, out int length, out string selected)
+    {
+        start = selectionStart;
+        length = selectionLength;
+        selected = "";
+        if (length <= 0 || start < 0 || start + length > text.Length) return false;
+        var lead = 0;
+        while (lead < length && char.IsWhiteSpace(text[start + lead])) lead++;
+        var trail = 0;
+        while (trail < length - lead && char.IsWhiteSpace(text[start + length - 1 - trail])) trail++;
+        if (lead + trail >= length) return false;
+        start += lead;
+        length -= lead + trail;
+        selected = text.Substring(start, length);
+        return true;
+    }
+
+    /// <summary>
+    /// 블럭 지정이 있으면 해당 구간만 변환 결과로 바꾸고(앞뒤 줄바꿈 보존), 없으면 전체 본문을 바꾼다.
+    /// </summary>
+    public static (string Text, int SelectionStart, int SelectionLength, bool IsBlock) ApplyRefinement(
+        string text, int selectionStart, int selectionLength, string refined)
+    {
+        if (TryTrimSelection(text, selectionStart, selectionLength, out var start, out var length, out _))
+        {
+            var updated = string.Concat(text.AsSpan(0, start), refined, text.AsSpan(start + length));
+            return (updated, start, refined.Length, true);
+        }
+        return (refined, 0, 0, false);
+    }
 }

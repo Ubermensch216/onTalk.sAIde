@@ -155,6 +155,21 @@ internal static class Program
         personalItem.DispatchId = 1;
         if (Guard(personalState)) throw new InvalidOperationException("개인 쪽지 재발송 보호 실패");
         preparedHelper.Close();
+        var groupNote = new GroupNoteWindow(store, preparationWriter, new ContactPreparation([personA, personB], "온톡 조직도 선택", DateTimeOffset.Now),
+            new PreviewPersonalizedAutomation([personA, personB]));
+        var groupSend = (Button)Get(groupNote, "_sendButton");
+        ((TextBox)Get(groupNote, "_editor")).Text = "";
+        if (groupSend.IsEnabled) throw new InvalidOperationException("본문 없이 같은 쪽지를 보낼 수 있습니다.");
+        ((TextBox)Get(groupNote, "_editor")).Text = "안녕하세요. 10월 정기 점검 일정을 안내드립니다.\n\n- 일시: 10월 22일(수) 14:00\n- 장소: 3층 회의실\n\n참석 여부를 회신해 주세요.";
+        if (!groupSend.IsEnabled) throw new InvalidOperationException("같은 쪽지 발송 단추가 켜지지 않았습니다.");
+        Render((FrameworkElement)groupNote.Content, Path.Combine(output, "group-note.png"), 760, 860);
+        Render((FrameworkElement)groupNote.Content, Path.Combine(output, "group-note-short.png"), 620, 560);
+        store.SaveTemplate("개인별 인사평정 결과 안내", "안녕하세요.\n인사평정 결과(순위) : {평정순위}\n이의가 있는 경우 별도 연락 바랍니다.");
+        Invoke(groupNote, "ReloadTemplates", "개인별 인사평정 결과 안내");
+        ((TextBox)Get(groupNote, "_aiProposal")).Text = "안녕하세요.\n10월 정기 점검 일정을 안내드립니다.\n\n일시: 10월 22일(수) 14:00\n장소: 3층 회의실\n\n참석 가능 여부를 회신해 주시면 감사하겠습니다.";
+        Invoke(groupNote, "ShowAi");
+        Render((FrameworkElement)groupNote.Content, Path.Combine(output, "group-note-ai.png"), 1000, 860);
+        groupNote.Close();
         var personal = new PersonalizedWindow(
             store,
             [personA, personB],

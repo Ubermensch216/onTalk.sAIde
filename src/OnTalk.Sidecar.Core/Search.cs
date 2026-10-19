@@ -18,6 +18,17 @@ public sealed record CollectionRange(int Count, DateTimeOffset? Since);
 
 public static class Snippet
 {
+    /// <summary>목록용 한 줄 요약. 공백을 하나로 줄이고 앞에서부터 <paramref name="max"/>자까지만 보여 준다.</summary>
+    public static string Brief(string text, int max = 50)
+    {
+        var flat = string.Join(' ', (text ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (flat.Length <= max) return flat;
+        var end = max;
+        // 서로게이트 쌍(이모지)의 가운데를 자르지 않는다.
+        if (char.IsLowSurrogate(flat[end])) end--;
+        return flat[..end].TrimEnd() + "…";
+    }
+
     /// <summary>본문에서 검색어가 처음 나오는 곳 주변을 한 줄로 잘라 낸다. 검색어가 본문에 없으면 앞부분을 쓴다.</summary>
     public static string Make(string body, IReadOnlyList<string> terms, int radius = 45)
     {

@@ -33,7 +33,8 @@
 | images/note-reading.png | 받은 쪽지 읽기 지원. 실제는 별도 상세창에 부착 |
 | images/note-writing.png | 새 쪽지 작성 지원. 실제는 별도 작성창에 부착 |
 | images/chat-support.png | 대화 원문 선택·답변 복사. 실제는 별도 대화창에 부착 |
-| images/prepared-contact-compose.png | 조직도 선택 직원 대상 쪽지 작성 도우미 (수신자 일괄 추가·예약·개인별 쪽지 전환) |
+| images/group-note.png | 조직도 선택 직원에게 같은 쪽지 (받는 사람 칩·서식·본문·예약·자동 발송/준비) |
+| images/prepared-contact-compose.png | (이전) 조직도 선택 직원 대상 쪽지 작성 도우미. 현재는 `group-note.png` 창으로 바뀜 |
 | images/personalized-notes.png | 개인별 쪽지 작성과 미리보기 창 (서식·사용자정의 헤더/표·치환 미리보기·예약) |
 | images/personalized-notes-full.png | 개인별 쪽지 전체 작업 카드 (저장 작업·서식·데이터·본문 확인·발송 방식·연속 발송) |
 | images/personalized-saved-tags.png | 개인별 쪽지 저장한 작업의 상태 태그 (임시 저장·발송 완료·일부 발송) |

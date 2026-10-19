@@ -97,6 +97,36 @@ public class DraftTextTests
         Assert.Equal(["{이름}", "{기한}"], DraftText.UnfilledPlaceholders("{이름}님, {기한}까지 제출 바랍니다. {이름}님께."));
         Assert.Empty(DraftText.UnfilledPlaceholders("중괄호 없음. 빈 {} 과 줄을 넘는 {가\n나} 는 자리 표시가 아니다."));
     }
+
+    [Fact]
+    public void 블럭_지정_구간이_있으면_해당_구간만_바꾸고_앞뒤_공백과_나머지_문장은_유지한다()
+    {
+        var original = "안녕하세요.\n회의 일정이 내일 오후로 바뀌었습니다.\n감사합니다.";
+        var target = "회의 일정이 내일 오후로 바뀌었습니다.";
+        var idx = original.IndexOf(target, StringComparison.Ordinal);
+
+        // 앞뒤 줄바꿈이 함께 드래그되어도 실제 문장 구간만 교체된다.
+        var result = DraftText.ApplyRefinement(original, idx - 1, target.Length + 2, "회의 일정이 내일 오후 2시로 변경되었습니다.");
+
+        Assert.True(result.IsBlock);
+        Assert.Equal("안녕하세요.\n회의 일정이 내일 오후 2시로 변경되었습니다.\n감사합니다.", result.Text);
+        Assert.Equal(idx, result.SelectionStart);
+        Assert.Equal("회의 일정이 내일 오후 2시로 변경되었습니다.".Length, result.SelectionLength);
+    }
+
+    [Fact]
+    public void 블럭_지정이_없거나_공백만_선택되면_전체_본문을_바꾼다()
+    {
+        var original = "첫 문장입니다.\n둘째 문장입니다.";
+
+        var noSelection = DraftText.ApplyRefinement(original, 3, 0, "다듬은 전체 본문입니다.");
+        Assert.False(noSelection.IsBlock);
+        Assert.Equal("다듬은 전체 본문입니다.", noSelection.Text);
+
+        var whitespaceOnly = DraftText.ApplyRefinement("가나다   라마바", 3, 3, "전체 교체");
+        Assert.False(whitespaceOnly.IsBlock);
+        Assert.Equal("전체 교체", whitespaceOnly.Text);
+    }
 }
 
 public sealed class DraftStoreTests : IDisposable
