@@ -12,4 +12,13 @@
     <ProjectReference Include="..\OnTalk.Sidecar.Storage\OnTalk.Sidecar.Storage.csproj" />
     <ProjectReference Include="..\OnTalk.Sidecar.AI\OnTalk.Sidecar.AI.csproj" />
   </ItemGroup>
+  <!-- 배포 용량을 줄인다: 앱이 쓰지 않는 공유 프레임워크 조각(WinForms, 구형 Windows용 테마, 진단·덤프 도구)을 묶음에서 뺀다. -->
+  <Target Name="PruneUnusedRuntimeFiles" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <_Unused Include="@(ResolvedFileToPublish)" Condition="
+        $([System.Text.RegularExpressions.Regex]::IsMatch('%(Filename)%(Extension)',
+        '^(System\.Windows\.Forms.*|System\.Design|System\.Drawing\.Design|WindowsFormsIntegration|System\.Diagnostics\.EventLog\.Messages|PresentationFramework\.(Luna|Royale|Aero)|createdump|mscordbi|mscordaccore.*|msquic|Microsoft\.DiaSymReader\.Native.*|clrgcexp)\.(dll|exe)$'))" />
+      <ResolvedFileToPublish Remove="@(_Unused)" />
+    </ItemGroup>
+  </Target>
 </Project>

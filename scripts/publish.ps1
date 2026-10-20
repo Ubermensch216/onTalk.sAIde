@@ -18,6 +18,9 @@ Copy-Item (Join-Path $root "README.md") (Join-Path $out "README.md")
 # README의 상대 문서 링크와 사용자 매뉴얼 이미지를 배포 폴더에서도 유지한다.
 Copy-Item -LiteralPath (Join-Path $root "docs") -Destination (Join-Path $out "docs") -Recurse
 Get-ChildItem $out -Filter *.pdb | Remove-Item
+# 문서 스크린샷은 팔레트 PNG로 줄인다(Python + Pillow 필요, 없으면 원본 그대로 둔다).
+python -I (Join-Path $PSScriptRoot "optimize-docs-images.py") (Join-Path $out "docs\images")
+if ($LASTEXITCODE -ne 0) { Write-Warning "문서 이미지를 줄이지 못해 원본 크기로 묶습니다." }
 
 $zip = "$out.zip"
 if (Test-Path $zip) { Remove-Item -LiteralPath $zip }
