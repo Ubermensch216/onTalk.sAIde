@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Media;
+using OnTalk.Sidecar.AI;
 using OnTalk.Sidecar.Automation;
 using OnTalk.Sidecar.Core;
 using OnTalk.Sidecar.Storage;
@@ -11,13 +13,14 @@ using TemplateRecord = OnTalk.Sidecar.Core.Template;
 namespace OnTalk.Sidecar.App;
 
 /// <summary>
-/// 개인별 쪽지 작업 창. 작업 단위(① 서식 → ② 대상자·데이터 → ③ 본문 확인 → ④ 발송 방식)마다 카드로 나누고,
+/// 개인별 쪽지 작업 창. 작업 단위(① 서식 → ② 대상자·데이터 → ③ 본문 확인 → ④ 첨부 파일 → ⑤ 발송 방식)마다 카드로 나누고,
 /// 발송 단추는 항상 보이는 아래 줄에 둔다.
 /// Saved work contains recipient snapshots and per-person bodies, never a shared personalized recipient list.
 /// </summary>
 public sealed class PersonalizedWindow : Window
 {
     private readonly ProfileStore _store;
+    private readonly OllamaWriter _writer;
     private PersonalizedWork _work;
     private readonly Func<PersonalizedWork, PersonalizedWorkItem, Task>? _prepare;
     private readonly IPersonalizedAutomation _automation;
@@ -37,14 +40,30 @@ public sealed class PersonalizedWindow : Window
     // ③ 본문
     private readonly TextBlock _selectedInfo = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _bodyInfo = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
-    private readonly TextBox _preview = new() { Height = 170 };
+    private readonly TextBox _preview = new() { Height = 170, IsInactiveSelectionHighlightEnabled = true };
+    private readonly TextBlock _aiScope = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11.5, Margin = new Thickness(2, 8, 2, 0) };
+    private readonly List<Button> _aiButtons = [];
+    private readonly Button _undoButton;
+    private bool _aiBusy, _running;
+    private long _revision;
+    private PersonalizedWorkItem? _undoItem;
+    private string? _undoText;
+    private int _undoSelectionStart, _undoSelectionLength;
+    private long _undoRevision = -1;
+    private readonly CancellationTokenSource _closing = new();
 
-    // ④ 발송 방식
+    // ⑤ 발송 방식
     private readonly CheckBox _useReservation = new() { Content = "예약 발송", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 14, 0) };
     private readonly DatePicker _reserveDate = new() { Width = 140, Margin = new Thickness(0, 0, 8, 0) };
     private readonly ComboBox _reserveHour = new() { Width = 70, Margin = new Thickness(0, 0, 4, 0) };
     private readonly ComboBox _reserveMinute = new() { Width = 70, Margin = new Thickness(0, 0, 4, 0) };
     private readonly TextBlock _reserveSummary = new() { TextWrapping = TextWrapping.Wrap };
+    private readonly CheckBox _useSms = new() { Content = "SMS 발송", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 12, 0, 0) };
+
+    // 첨부 파일. 모든 대상에게 같은 파일을 붙인다. 파일은 복사하지 않고 경로만 들고 있다가, 발송 때 온톡의 파일 선택창으로 붙인다.
+    private readonly List<string> _attachments = [];
+    private readonly StackPanel _attachList = new();
+    private readonly TextBlock _attachSummary = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0) };
 
     // 작업 / 하단 줄
     private readonly ComboBox _saved = new();
@@ -68,12 +87,13 @@ public sealed class PersonalizedWindow : Window
 
     public PersonalizedWindow(
         ProfileStore store,
+        OllamaWriter writer,
         IReadOnlyList<ContactPerson> people,
         string template,
         Func<PersonalizedWork, PersonalizedWorkItem, Task>? prepare = null,
         IPersonalizedAutomation? automation = null)
     {
-        (_store, _prepare, _automation) = (store, prepare, automation ?? OnTalkPersonalizedAutomation.Instance);
+        (_store, _writer, _prepare, _automation) = (store, writer, prepare, automation ?? OnTalkPersonalizedAutomation.Instance);
         _work = new()
         {
             Template = template,
@@ -84,8 +104,19 @@ public sealed class PersonalizedWindow : Window
         };
         EnsureHeaders();
         InitializeReservationControls();
+        _undoButton = new Button
+        {
+            Content = "되돌리기",
+            Focusable = false,
+            IsEnabled = false,
+            Padding = new Thickness(8, 2, 8, 2),
+            MinHeight = 24,
+            FontSize = 11.5,
+            ToolTip = "직전 AI 문장 변환 전 상태로 되돌립니다.",
+        };
+        _undoButton.Click += (_, _) => UndoAi();
 
-        Title = "개인별 쪽지 · 작성과 미리보기"; Width = 900; Height = 900; MinWidth = 700; MinHeight = 560;
+        Title ="개인별 쪽지 · 작성과 미리보기"; Width = 900; Height = 900; MinWidth = 700; MinHeight = 560;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Style = (Style)FindResource("AppWindow");
         StyleControls();
@@ -106,6 +137,7 @@ public sealed class PersonalizedWindow : Window
         page.Children.Add(BuildTemplateSection());
         page.Children.Add(BuildRecipientSection());
         page.Children.Add(BuildBodySection());
+        page.Children.Add(BuildAttachmentSection());
         page.Children.Add(BuildReservationSection());
         _page.Content = page;
 
@@ -128,7 +160,7 @@ public sealed class PersonalizedWindow : Window
         };
         Activated += (_, _) => { if (_batchCts is null) { FlushPreview(); Commit(); RefreshGrid(); ShowPreview(); } };
         Closing += (_, e) => { if (!_closed && !ConfirmLeave("개인별 쪽지 닫기", "닫습니다.")) e.Cancel = true; };
-        Closed += (_, _) => { _batchCts?.Cancel(); _closed = true; };
+        Closed += (_, _) => { _batchCts?.Cancel(); _closed = true; _closing.Cancel(); };
         Load();
         SetSavedExpanded(_saved.Items.Count > 0);   // 저장한 작업이 없으면 접어 둔다.
     }
@@ -159,7 +191,7 @@ public sealed class PersonalizedWindow : Window
         _grid.AutomationName("개인별 대상자와 입력 데이터");
         _template.AutomationName("서식 내용"); _templateName.AutomationName("서식 제목"); _preview.AutomationName("선택한 사람의 본문");
 
-        foreach (var c in new UIElement[] { _templates, _templateName, _template, _grid, _preview, _saved, _useReservation })
+        foreach (var c in new UIElement[] { _templates, _templateName, _template, _grid, _preview, _saved, _useReservation, _useSms, _attachList })
             _interactiveControls.Add(c);
         _interactiveControls.Add(_fieldChips);
         ForwardWheel(_grid); ForwardWheel(_template); ForwardWheel(_preview);
@@ -168,7 +200,9 @@ public sealed class PersonalizedWindow : Window
         _saved.ItemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse(SavedItemTemplate);
         _saved.AddHandler(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, new RoutedEventHandler(OnRemoveSavedClick));
         _templates.SelectionChanged += (_, _) => ApplySelectedTemplate();
-        _preview.TextChanged += (_, _) => UpdateBodyInfo();
+        _preview.TextChanged += (_, _) => { _revision++; UpdateBodyInfo(); UpdateAiScope(); UpdateUndoButton(); };
+        _preview.SelectionChanged += (_, _) => UpdateAiScope();
+        _undoButton.Style = Res<Style>("SmallButton");
         _template.TextChanged += (_, _) => UpdateFieldChips();
         _grid.SelectionChanged += (_, _) => { FlushPreview(); ShowPreview(); };
         _grid.CellEditEnding += (_, e) =>
@@ -406,8 +440,19 @@ public sealed class PersonalizedWindow : Window
         var info = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
         DockPanel.SetDock(_bodyInfo, Dock.Right);
         info.Children.Add(_bodyInfo); info.Children.Add(_selectedInfo);
-        body.Children.Add(info);
-        body.Children.Add(_preview);
+
+        // 왼쪽: 사람 정보 + 본문 / 오른쪽: AI 문장 다듬기 패널(본문과 같은 높이로 나란히 둔다).
+        var left = new StackPanel();
+        left.Children.Add(info);
+        left.Children.Add(_preview);
+        var compare = new Grid();
+        compare.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        compare.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(228) });
+        compare.Children.Add(left);
+        var aiPanel = BuildAiPanel();
+        Grid.SetColumn(aiPanel, 1);
+        compare.Children.Add(aiPanel);
+        body.Children.Add(compare);
 
         var nav = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
         nav.Children.Add(SmallBtn("◀ 이전 사람", (_, _) => MoveSelection(-1)));
@@ -429,7 +474,58 @@ public sealed class PersonalizedWindow : Window
         body.Children.Add(nav);
 
         var generate = Btn("서식으로 본문 생성 · 다시 생성", (_, _) => GenerateBodies(), style: "PrimaryButton", tip: "①의 서식과 ②의 값을 합쳐 미발송 대상의 본문을 만듭니다.");
-                return Section("3", "본문 확인과 수정", "사람을 고르면 본문이 나타납니다. 필요한 경우 한 사람씩 직접 고칠 수 있습니다.", body, generate);
+        return Section("3", "본문 확인과 수정", "사람을 고르면 본문이 나타납니다. 필요한 경우 한 사람씩 직접 고치거나 AI로 다듬을 수 있습니다.", body, generate);
+    }
+
+    private Border BuildAiPanel()
+    {
+        var stack = new StackPanel();
+
+        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
+        DockPanel.SetDock(_undoButton, Dock.Right);
+        header.Children.Add(_undoButton);
+        header.Children.Add(new TextBlock
+        {
+            Text = "✦ AI 문장 다듬기",
+            FontWeight = FontWeights.SemiBold,
+            FontSize = 12.5,
+            Foreground = Res<Brush>("AccentText"),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        stack.Children.Add(header);
+
+        var buttonsGrid = new UniformGrid { Columns = 2, Rows = 3, Margin = new Thickness(0, 2, 0, 0) };
+        foreach (var preset in OllamaWriter.RefinePresets)
+        {
+            var btn = new Button
+            {
+                Content = preset.Label,
+                Style = Res<Style>("SmallButton"),
+                Focusable = false,
+                Margin = new Thickness(2),
+                MinHeight = 36,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                ToolTip = preset.Description,
+            };
+            btn.AutomationName("AI " + preset.Label);
+            btn.Click += (_, _) => OnAiRefineAsync(preset);
+            _aiButtons.Add(btn);
+            buttonsGrid.Children.Add(btn);
+        }
+        stack.Children.Add(buttonsGrid);
+        stack.Children.Add(_aiScope);
+
+        return new Border
+        {
+            Margin = new Thickness(10, 0, 0, 0),
+            Background = Res<Brush>("AccentSoft"),
+            BorderBrush = (Brush)new BrushConverter().ConvertFromString("#CFDBFF")!,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(10),
+            Child = stack,
+        };
     }
 
     private UIElement BuildReservationSection()
@@ -440,7 +536,86 @@ public sealed class PersonalizedWindow : Window
         row.Children.Add(_reservePickers);
         body.Children.Add(row);
         body.Children.Add(_reserveSummary);
-        return Section("4", "발송 방식", "기본은 즉시 발송입니다. 예약하면 모든 대상에게 같은 예약 시각이 적용됩니다.", body);
+
+        _useSms.ToolTip = "온톡 쪽지 창의 ‘SMS 발송’ 확인란을 선택한 상태로 모든 대상에게 보냅니다.";
+        body.Children.Add(_useSms);
+        return Section("5", "발송 방식", "기본은 즉시 발송입니다. 예약하면 모든 대상에게 같은 예약 시각이 적용되며, SMS 발송도 모든 대상에게 똑같이 적용됩니다.", body);
+    }
+
+    private UIElement BuildAttachmentSection()
+    {
+        var body = new StackPanel();
+        var bar = new WrapPanel();
+        bar.Children.Add(SmallBtn("파일 추가…", (_, _) => OnPickAttachments(),
+            $"붙일 파일을 고릅니다. 파일을 이 영역에 끌어다 놓아도 됩니다. 모든 대상에게 같은 파일이 붙으며, 파일당 최대 20MB, 최대 {NoteAttachments.MaxCount}개, exe 파일은 붙일 수 없습니다."));
+        body.Children.Add(bar);
+        body.Children.Add(_attachList);
+        body.Children.Add(_attachSummary);
+        var section = Section("4", "첨부 파일", "모든 대상에게 같은 파일을 붙입니다. 필요 없으면 비워 두세요.", body);
+        section.AllowDrop = true;
+        section.DragOver += (_, e) =>
+        {
+            e.Effects = _batchCts is null && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+            e.Handled = true;
+        };
+        section.Drop += (_, e) =>
+        {
+            if (_batchCts is null && e.Data.GetData(DataFormats.FileDrop) is string[] dropped) AddAttachments(dropped);
+            e.Handled = true;
+        };
+        RenderAttachments();
+        return section;
+    }
+
+    // ───────────────────────── 첨부 파일 ─────────────────────────
+
+    private void OnPickAttachments()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog { Title = "첨부할 파일 선택", Multiselect = true, CheckFileExists = true };
+        if (dialog.ShowDialog(this) == true) AddAttachments(dialog.FileNames);
+    }
+
+    private void AddAttachments(IEnumerable<string> files)
+    {
+        var added = 0;
+        foreach (var path in files)
+        {
+            if (System.IO.Directory.Exists(path)) { _status.Text = $"폴더는 붙일 수 없습니다: {System.IO.Path.GetFileName(path)}"; continue; }
+            if (_attachments.Contains(path, StringComparer.OrdinalIgnoreCase)) continue;
+            // 이름·형식·크기·개수는 발송 때와 같은 규칙으로 지금 확인한다.
+            if (NoteAttachments.Validate([.. _attachments, path]) is { } problem) { _status.Text = problem; continue; }
+            _attachments.Add(path);
+            added++;
+        }
+        RenderAttachments();
+        if (added > 0) _status.Text = $"첨부 {added}개를 추가했습니다. 발송 때 모든 대상의 온톡 쪽지 창에 붙입니다.";
+    }
+
+    private void RenderAttachments()
+    {
+        _attachList.Children.Clear();
+        foreach (var path in _attachments.ToList())
+        {
+            var row = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var size = new System.IO.FileInfo(path) is { Exists: true } info ? NoteAttachments.Size(info.Length) : "파일 없음";
+            row.Children.Add(new TextBlock { Text = "📎 " + System.IO.Path.GetFileName(path), ToolTip = path, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
+            var sizeText = new TextBlock { Text = size, Foreground = Res<Brush>("Muted"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 8, 0) };
+            Grid.SetColumn(sizeText, 1); row.Children.Add(sizeText);
+            var remove = new Button { Content = "✕", Style = Res<Style>("SmallButton"), ToolTip = "첨부에서 뺍니다(원본 파일은 그대로)." };
+            remove.AutomationName("첨부 제거 " + System.IO.Path.GetFileName(path));
+            remove.Click += (_, _) => { _attachments.Remove(path); RenderAttachments(); };
+            Grid.SetColumn(remove, 2); row.Children.Add(remove);
+            _attachList.Children.Add(row);
+        }
+        var total = _attachments.Sum(p => new System.IO.FileInfo(p) is { Exists: true } f ? f.Length : 0);
+        _attachSummary.Text = _attachments.Count == 0
+            ? $"붙인 파일이 없습니다. 파일당 최대 20MB, 최대 {NoteAttachments.MaxCount}개, exe 파일은 붙일 수 없습니다."
+            : $"첨부 {_attachments.Count}개 · 합계 {NoteAttachments.Size(total)} · 대상자마다 같은 파일을 새로 붙입니다." +
+              (total > NoteAttachments.MaxFileBytes ? " 합계가 20MB를 넘으면 온톡이 거절할 수 있습니다." : "");
+        _attachSummary.Foreground = Res<Brush>(total > NoteAttachments.MaxFileBytes ? "Warn" : "Muted");
     }
 
     private FrameworkElement BuildReservationPickers()
@@ -820,13 +995,15 @@ public sealed class PersonalizedWindow : Window
             _status.Text = reserveError;
             return;
         }
+        if (NoteAttachments.Validate(_attachments) is { } attachProblem) { _status.Text = attachProblem; return; }
         var skipped = _work.Items.Count(i => !i.Attempted) - candidates.Count;
         var sample = string.Join("\n", candidates.Take(5).Select(c => $"  · {c.Name} ({c.Title} · {c.Organization})"));
         var more = candidates.Count > 5 ? $"\n  외 {candidates.Count - 5}명" : "";
-        var modeText = reservation is { } at ? $"{at:yyyy-MM-dd HH:mm} 예약 발송" : "즉시 발송";
+        var modeText = ModeText(reservation);
         var prompt =
             $"준비된 미발송 대상 {candidates.Count}명에게 개인별 쪽지를 연속으로 자동 발송합니다.\n\n" +
             $"발송 방식: {modeText}\n" +
+            AttachmentLine() +
             $"대상 미리보기:\n{sample}{more}\n\n" +
             (skipped > 0 ? $"※ 본문이 준비되지 않은 미발송 {skipped}명은 이번에 보내지 않습니다.\n\n" : "") +
             "온톡에서 빈 '새 쪽지' 창을 자동으로 확보(없으면 새로 열기)하여 한 사람씩 수신자 대조·본문 반영·검증·전송을 수행합니다.\n" +
@@ -863,11 +1040,13 @@ public sealed class PersonalizedWindow : Window
             _status.Text = reserveError;
             return;
         }
-        var modeText = reservation is { } at ? $"{at:yyyy-MM-dd HH:mm} 예약 발송" : "즉시 발송";
+        if (NoteAttachments.Validate(_attachments) is { } attachProblem) { _status.Text = attachProblem; return; }
+        var modeText = ModeText(reservation);
         var preview = item.Body.Length > 180 ? item.Body[..180] + "…" : item.Body;
         var prompt =
             $"{item.Name} ({item.Title} · {item.Organization}) 1명에게 개인별 쪽지를 자동 발송합니다.\n\n" +
             $"발송 방식: {modeText}\n" +
+            AttachmentLine() +
             $"본문 ({NoteBytes.Count(item.Body)} Bytes):\n{preview}\n\n" +
             "보낼까요?";
         if (Dialogs.Show(this, prompt, "개인별 쪽지 자동 발송 확인", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
@@ -878,11 +1057,21 @@ public sealed class PersonalizedWindow : Window
         await RunBatchAsync([item], reservation);
     }
 
+    private string ModeText(DateTime? reservation) =>
+        (reservation is { } at ? $"{at:yyyy-MM-dd HH:mm} 예약 발송" : "즉시 발송") + (_useSms.IsChecked == true ? " · SMS 발송 선택" : "");
+
+    private string AttachmentLine() => _attachments.Count == 0
+        ? ""
+        : $"첨부 파일 {_attachments.Count}개(대상마다 같은 파일): {string.Join(", ", _attachments.Take(5).Select(System.IO.Path.GetFileName))}" +
+          $"{(_attachments.Count > 5 ? $" 외 {_attachments.Count - 5}개" : "")}\n";
+
     public async Task<PersonalizedBatchSummary> RunBatchAsync(
         IReadOnlyList<PersonalizedWorkItem>? candidates = null,
         DateTime? reservation = null)
     {
         Save(draft: false);
+        var attachments = _attachments.ToList();
+        var sms = _useSms.IsChecked == true;
         var targets = candidates ?? _work.Items.Where(i => !i.Attempted && NotePersonalization.IsValidBody(i.Body)).ToList();
         using var cts = new CancellationTokenSource();
         _batchCts = cts;
@@ -906,7 +1095,9 @@ public sealed class PersonalizedWindow : Window
                     ShowPreview();
                     _status.Text = text;
                 },
-                cts.Token);
+                cts.Token,
+                attachments,
+                sms);
 
             if (!_closed)
             {
@@ -931,6 +1122,7 @@ public sealed class PersonalizedWindow : Window
 
     private void SetBatchRunning(bool running)
     {
+        _running = running;
         foreach (var control in _interactiveControls)
         {
             control.IsEnabled = !running;
@@ -946,6 +1138,123 @@ public sealed class PersonalizedWindow : Window
         {
             _preview.IsReadOnly = true;
         }
+        UpdateAiButtons();
+    }
+
+    // ───────────────────────── AI 문장 다듬기 ─────────────────────────
+
+    /// <summary>AI로 고칠 수 있는 상태: 사람이 골라져 있고, 발송을 시도하지 않았고, 연속 발송·쪽지창 준비 중이 아니다.</summary>
+    private bool CanRefine => !_running && _batchCts is null && _shown is { Attempted: false };
+
+    private void UpdateAiScope()
+    {
+        if (DraftText.TryTrimSelection(_preview.Text, _preview.SelectionStart, _preview.SelectionLength, out _, out var len, out _))
+        {
+            _aiScope.Text = $"선택 구간만 변환 ({len}자)";
+            _aiScope.Foreground = Res<Brush>("AccentText");
+            _aiScope.FontWeight = FontWeights.SemiBold;
+        }
+        else
+        {
+            _aiScope.Text = "블럭 지정 시 그 구간만, 없으면 이 사람의 전체 본문 변환";
+            _aiScope.Foreground = Res<Brush>("Muted");
+            _aiScope.FontWeight = FontWeights.Normal;
+        }
+    }
+
+    private void UpdateUndoButton() =>
+        _undoButton.IsEnabled = !_aiBusy && CanRefine && _undoText is not null && ReferenceEquals(_undoItem, _shown) && _undoRevision == _revision;
+
+    private void UpdateAiButtons()
+    {
+        var enabled = !_aiBusy && CanRefine;
+        foreach (var b in _aiButtons) b.IsEnabled = enabled;
+        UpdateUndoButton();
+    }
+
+    private async void OnAiRefineAsync(AiRefinePreset preset)
+    {
+        if (_aiBusy || _closed || !CanRefine) return;
+        var item = _shown!;
+        var snapshot = _preview.Text;
+        if (snapshot.Trim().Length == 0)
+        {
+            _status.Text = "다듬을 본문이 없습니다. ‘서식으로 본문 생성’을 누르거나 본문을 먼저 입력하세요.";
+            _preview.Focus();
+            return;
+        }
+
+        var selStart = _preview.SelectionStart;
+        var selLength = _preview.SelectionLength;
+        var isBlock = DraftText.TryTrimSelection(snapshot, selStart, selLength, out var trimmedStart, out var trimmedLength, out var selectedBlock);
+
+        _aiBusy = true;
+        UpdateAiButtons();
+        _status.Text = isBlock
+            ? $"로컬 AI가 {item.Name}님 본문의 선택 구간({trimmedLength}자)을 ‘{preset.Label}’ 방식으로 다듬는 중입니다..."
+            : $"로컬 AI가 {item.Name}님 본문 전체를 ‘{preset.Label}’ 방식으로 다듬는 중입니다...";
+
+        var revision = _revision;
+        try
+        {
+            var refined = await _writer.RefineAsync(snapshot, isBlock ? selectedBlock : null, preset.Instruction, _closing.Token);
+            if (_closed) return;
+            if (_revision != revision || !ReferenceEquals(_shown, item))
+            {
+                _status.Text = "기다리는 사이 본문이나 선택한 사람이 바뀌어 AI 변환 결과를 반영하지 않았습니다.";
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(refined))
+            {
+                _status.Text = "AI로부터 빈 응답을 받아 본문을 유지했습니다.";
+                return;
+            }
+
+            _undoItem = item;
+            _undoText = snapshot;
+            _undoSelectionStart = isBlock ? trimmedStart : 0;
+            _undoSelectionLength = isBlock ? trimmedLength : 0;
+
+            var applied = DraftText.ApplyRefinement(snapshot, selStart, selLength, refined);
+            _preview.Text = applied.Text;
+            _undoRevision = _revision;
+
+            _preview.Focus();
+            if (applied.IsBlock)
+            {
+                _preview.Select(applied.SelectionStart, applied.SelectionLength);
+                _status.Text = $"{item.Name}님 본문의 선택한 문장을 ‘{preset.Label}’ 방식으로 바꿨습니다. 마음에 들지 않으면 ‘되돌리기’를 누르세요.";
+            }
+            else
+            {
+                _preview.CaretIndex = _preview.Text.Length;
+                _status.Text = $"{item.Name}님 본문 전체를 ‘{preset.Label}’ 방식으로 다듬었습니다. 사실·날짜를 확인하세요.";
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (AnalysisUnavailableException ex) { if (!_closed) _status.Text = ex.Message; }
+        finally
+        {
+            _aiBusy = false;
+            if (!_closed) UpdateAiButtons();
+        }
+    }
+
+    private void UndoAi()
+    {
+        if (_undoText is null || !ReferenceEquals(_undoItem, _shown) || _undoRevision != _revision) return;
+        var restoreText = _undoText;
+        var restoreStart = _undoSelectionStart;
+        var restoreLength = _undoSelectionLength;
+        _undoText = null; _undoItem = null; _undoRevision = -1;
+        _preview.Text = restoreText;
+        _preview.Focus();
+        if (restoreLength > 0 && restoreStart + restoreLength <= _preview.Text.Length)
+            _preview.Select(restoreStart, restoreLength);
+        else
+            _preview.CaretIndex = _preview.Text.Length;
+        UpdateAiButtons();
+        _status.Text = "AI 변환 전 문장으로 되돌렸습니다.";
     }
 
     // ───────────────────────── 표·본문 ─────────────────────────
@@ -1109,6 +1418,8 @@ public sealed class PersonalizedWindow : Window
             ? (_work.Items.Count == 0 ? "대상자가 없습니다. 조직도에서 대상을 고른 뒤 다시 여세요." : "②의 목록에서 사람을 고르세요.")
             : $"{_shown.Name} · {_shown.Organization} · {_shown.Title}" + (_shown.Attempted ? "  (발송을 시도해 수정할 수 없음)" : "") + $"  ·  처리 상태: {_shown.Status}";
         UpdateBodyInfo();
+        UpdateAiScope();
+        UpdateAiButtons();
     }
 
     private void UpdateBodyInfo()

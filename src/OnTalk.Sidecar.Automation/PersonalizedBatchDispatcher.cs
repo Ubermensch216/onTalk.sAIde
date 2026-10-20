@@ -91,11 +91,19 @@ public static class PersonalizedBatchDispatcher
         IPersonalizedDispatchStore store,
         IPersonalizedAutomation automation,
         Action<PersonalizedWorkItem, int, int, string>? onProgress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? attachments = null,
+        bool sms = false)
     {
+        attachments ??= [];
         if (candidates.Count == 0)
         {
             return new PersonalizedBatchSummary(0, 0, 0, false, "발송할 준비된 미발송 대상이 없습니다.");
+        }
+
+        if (NoteAttachments.Validate(attachments) is { } attachProblem)
+        {
+            return new PersonalizedBatchSummary(candidates.Count, 0, 0, true, attachProblem);
         }
 
         if (candidates.GroupBy(c => c.Person.DisplayIdentity).Any(g => g.Count() > 1))
@@ -157,7 +165,9 @@ public static class PersonalizedBatchDispatcher
                 reservation,
                 store,
                 automation,
-                cancellationToken));
+                cancellationToken,
+                attachments,
+                sms));
 
             if (step.Sent)
             {
@@ -195,7 +205,9 @@ public static class PersonalizedBatchDispatcher
         DateTime? reservation,
         IPersonalizedDispatchStore store,
         IPersonalizedAutomation automation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<string> attachments,
+        bool sms)
     {
         var prefix = $"[{order}/{total}] {item.Name}";
 
@@ -290,6 +302,42 @@ public static class PersonalizedBatchDispatcher
                 $"{prefix}: 본문 반영에 실패해 중단했습니다({ExplainApply(apply.Status)}). 열려 있는 온톡 창을 확인하세요.");
         }
 
+        // 첨부는 온톡의 파일 선택창으로 붙이고, 붙일 때마다 첨부 목록에 이름이 늘었는지 확인한다.
+        var attachedNames = new List<string>();
+        foreach (var path in attachments)
+        {
+            var file = Path.GetFileName(path);
+            var attach = automation.AttachFile(hwnd, path);
+            if (attach != ActionStatus.Ok)
+            {
+                item.Status = "보류 · 첨부 실패";
+                store.SavePersonalizedWork(work);
+                return new StepOutcome(
+                    false,
+                    false,
+                    true,
+                    $"{prefix}: {item.Status}",
+                    $"{prefix}: 첨부 ‘{file}’을(를) 붙이지 못해 중단했습니다({ExplainAction(attach)}). 온톡이 용량·개수·형식을 거절했을 수 있습니다. 열려 있는 온톡 창을 확인하세요.");
+            }
+            attachedNames.Add(file);
+        }
+
+        if (sms)
+        {
+            var smsStatus = automation.SetSms(hwnd, true);
+            if (smsStatus != ActionStatus.Ok)
+            {
+                item.Status = "보류 · SMS 선택 실패";
+                store.SavePersonalizedWork(work);
+                return new StepOutcome(
+                    false,
+                    false,
+                    true,
+                    $"{prefix}: {item.Status}",
+                    $"{prefix}: SMS 발송을 선택하지 못해 중단했습니다({ExplainAction(smsStatus)}). 열려 있는 온톡 창을 확인하세요.");
+            }
+        }
+
         if (reservation is { } when)
         {
             var resStatus = automation.SetReservation(hwnd, when);
@@ -308,7 +356,7 @@ public static class PersonalizedBatchDispatcher
 
         var state = automation.ReadCompose(hwnd);
         var finalBody = item.Body.Replace("\r\n", "\n");
-        var expected = new ExpectedCompose([item.Name], finalBody, reservation, false);
+        var expected = new ExpectedCompose([item.Name], finalBody, reservation, sms, attachedNames);
         var diff = state is null ? "온톡 작성 창을 읽지 못했습니다." : ComposeActions.Difference(state, expected);
         if (state is null || diff is not null)
         {

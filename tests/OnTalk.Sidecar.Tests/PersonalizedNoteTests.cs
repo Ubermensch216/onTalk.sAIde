@@ -184,6 +184,88 @@ public sealed class PersonalizedNoteTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task 자동_연속_발송은_모든_대상에게_같은_첨부와_SMS를_적용한다()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ontalk-personalized-attach", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var store = ProfileStore.Open(root, "attach-user");
+            var file = Path.Combine(root, "안내문.txt");
+            File.WriteAllText(file, "첨부 내용");
+            var work = new PersonalizedWork
+            {
+                Items =
+                [
+                    new() { Person = new ContactPerson("1", "김예시", "주무관", ["예시시", "총무과"]), Body = "첫 번째 본문" },
+                    new() { Person = new ContactPerson("2", "박예시", "팀장", ["예시시", "기획과"]), Body = "두 번째 본문" },
+                ]
+            };
+            var fake = new FakeBatchAutomation(new Dictionary<string, IReadOnlyList<PersonRow>>
+            {
+                ["김예시"] = [Row("김예시", "주무관", "예시시 / 총무과")],
+                ["박예시"] = [Row("박예시", "팀장", "예시시 / 기획과")],
+            });
+
+            var summary = await PersonalizedBatchDispatcher.RunAsync(work, work.Items, null, store, fake, attachments: [file], sms: true);
+
+            Assert.False(summary.StoppedEarly);
+            Assert.Equal(2, summary.SentCount);
+            Assert.Equal([file, file], fake.AttachedPaths);
+            Assert.Equal(2, fake.SmsOnCount);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task 첨부를_붙이지_못하면_전송하지_않고_중단한다()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ontalk-personalized-attachfail", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var store = ProfileStore.Open(root, "attach-fail-user");
+            var file = Path.Combine(root, "안내문.txt");
+            File.WriteAllText(file, "첨부 내용");
+            var work = new PersonalizedWork
+            {
+                Items = [new() { Person = new ContactPerson("1", "김예시", "주무관", ["예시시", "총무과"]), Body = "본문" }]
+            };
+            var fake = new FakeBatchAutomation(new Dictionary<string, IReadOnlyList<PersonRow>>
+            {
+                ["김예시"] = [Row("김예시", "주무관", "예시시 / 총무과")],
+            })
+            { AttachResult = ActionStatus.UiNotFound };
+
+            var summary = await PersonalizedBatchDispatcher.RunAsync(work, work.Items, null, store, fake, attachments: [file]);
+
+            Assert.True(summary.StoppedEarly);
+            Assert.Equal(0, summary.SentCount);
+            Assert.False(work.Items[0].Attempted);
+            Assert.Equal("보류 · 첨부 실패", work.Items[0].Status);
+            Assert.Empty(store.GetDispatches());
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task 첨부_점검에_걸리면_온톡을_건드리지_않고_멈춘다()
+    {
+        var work = new PersonalizedWork { Items = [new() { Person = new ContactPerson("1", "김예시", "주무관", ["예시시"]), Body = "본문" }] };
+        var fake = new FakeBatchAutomation(new Dictionary<string, IReadOnlyList<PersonRow>>());
+        var root = Path.Combine(Path.GetTempPath(), "ontalk-personalized-attachbad", Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var store = ProfileStore.Open(root, "attach-bad-user");
+            var summary = await PersonalizedBatchDispatcher.RunAsync(work, work.Items, null, store, fake,
+                attachments: [Path.Combine(root, "없는파일.txt")]);
+            Assert.True(summary.StoppedEarly);
+            Assert.Empty(fake.AttachedPaths);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
     private static PersonRow Row(string name, string title, string detail) =>
         new(name, title, [detail], new AccNode(AccNode.ListItem, name, "", 0, []));
 
@@ -223,6 +305,25 @@ public sealed class PersonalizedNoteTests
         public ActionStatus SetReservation(IntPtr compose, DateTime when)
         {
             _state = _state with { Reservation = when };
+            return ActionStatus.Ok;
+        }
+
+        public List<string> AttachedPaths { get; } = [];
+        public ActionStatus AttachResult { get; set; } = ActionStatus.Ok;
+        public int SmsOnCount { get; private set; }
+
+        public ActionStatus AttachFile(IntPtr compose, string path)
+        {
+            if (AttachResult != ActionStatus.Ok) return AttachResult;
+            AttachedPaths.Add(path);
+            _state = _state with { Attachments = [.. _state.Attachments, Path.GetFileName(path)] };
+            return ActionStatus.Ok;
+        }
+
+        public ActionStatus SetSms(IntPtr compose, bool on)
+        {
+            if (on) SmsOnCount++;
+            _state = _state with { SmsChecked = on };
             return ActionStatus.Ok;
         }
 

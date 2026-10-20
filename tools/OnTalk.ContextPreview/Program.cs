@@ -183,6 +183,7 @@ internal static class Program
         groupNote.Close();
         var personal = new PersonalizedWindow(
             store,
+            new OllamaWriter(),
             [personA, personB],
             "{소속} {이름} ({직급})님, {과정명} 일정은 {교육일시}입니다.",
             (_, _) => Task.CompletedTask,

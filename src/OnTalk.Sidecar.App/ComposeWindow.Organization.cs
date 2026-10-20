@@ -15,7 +15,7 @@ public partial class ComposeWindow
     private void OnPersonalize(object sender, RoutedEventArgs e)
     {
         if (_personalizedWindow is not null) { _personalizedWindow.Show(); _personalizedWindow.Activate(); return; }
-        _personalizedWindow = new PersonalizedWindow(_store, _preparedPeople, Editor.Text, PreparePersonalizedAsync) { Owner = this };
+        _personalizedWindow = new PersonalizedWindow(_store, _writer, _preparedPeople, Editor.Text, PreparePersonalizedAsync) { Owner = this };
         _personalizedWindow.Closed += (_, _) => _personalizedWindow = null;
         _personalizedWindow.Show();
     }

@@ -48,7 +48,7 @@ public sealed class GroupNoteWindow : Window
     private readonly TextBox _editor = new() { Height = 220, IsInactiveSelectionHighlightEnabled = true };
     private readonly TextBlock _bytes = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _bodyWarn = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0), Visibility = Visibility.Collapsed };
-    private readonly TextBlock _aiScope = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11.5, Margin = new Thickness(0, 2, 0, 6) };
+    private readonly TextBlock _aiScope = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11.5, Margin = new Thickness(2, 8, 2, 0) };
     private readonly List<Button> _aiButtons = [];
     private readonly Button _undoButton;
     private bool _applyingTemplate;
@@ -638,7 +638,6 @@ public sealed class GroupNoteWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
         });
         stack.Children.Add(header);
-        stack.Children.Add(_aiScope);
 
         var buttonsGrid = new UniformGrid { Columns = 2, Rows = 3, Margin = new Thickness(0, 2, 0, 0) };
         foreach (var preset in OllamaWriter.RefinePresets)
@@ -660,15 +659,7 @@ public sealed class GroupNoteWindow : Window
             buttonsGrid.Children.Add(btn);
         }
         stack.Children.Add(buttonsGrid);
-
-        stack.Children.Add(new TextBlock
-        {
-            Text = "문장을 드래그해 블럭 지정하면 그 구간만 바꾸고, 선택이 없으면 전체 본문을 다듬습니다.",
-            FontSize = 11,
-            Foreground = Res<Brush>("Muted"),
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(2, 8, 2, 0),
-        });
+        stack.Children.Add(_aiScope);
 
         return new Border
         {
@@ -698,11 +689,6 @@ public sealed class GroupNoteWindow : Window
         _useSms.Margin = new Thickness(0, 10, 0, 0);
         _useSms.ToolTip = "온톡 쪽지 창의 ‘SMS 발송’ 확인란을 선택한 상태로 보냅니다.";
         body.Children.Add(_useSms);
-        body.Children.Add(new TextBlock
-        {
-            Text = "온톡 쪽지 창의 ‘SMS 발송’을 선택합니다. 실제 문자 발송 여부와 비용은 온톡·기관 설정에 따릅니다.",
-            FontSize = 11.5, Foreground = Res<Brush>("Muted"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(22, 2, 0, 0),
-        });
         return WorkUi.Section(this, "4", "발송 방식", "", body);
     }
 
@@ -873,7 +859,7 @@ public sealed class GroupNoteWindow : Window
         }
         else
         {
-            _aiScope.Text = "전체 본문 변환 · 일부는 블럭 지정";
+            _aiScope.Text = "블럭 지정 시 그 구간만, 없으면 전체 변환";
             _aiScope.Foreground = Res<Brush>("Muted");
             _aiScope.FontWeight = FontWeights.Normal;
         }

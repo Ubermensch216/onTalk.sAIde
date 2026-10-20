@@ -758,7 +758,7 @@ public partial class PanelWindow : Window
         if (personalize && preparation is not null)
         {
             _personalizedWindow?.Close();
-            _personalizedWindow = new PersonalizedWindow(_store, preparation.People, "") { Owner = this };
+            _personalizedWindow = new PersonalizedWindow(_store, _writer, preparation.People, "") { Owner = this };
             _personalizedWindow.Closed += (s, _) =>
             {
                 if (ReferenceEquals(s, _personalizedWindow))
@@ -1057,10 +1057,38 @@ public partial class PanelWindow : Window
         }
         Add("온톡 옆에서 열기", Reveal);
         Add("할 일 목록", OpenTasks, _store is not null);
+        AddAutoStart(menu);
         Add("끝내기", Close);
         // 메뉴 밖을 눌렀을 때 닫히려면 이 프로그램이 앞에 있어야 한다.
         SetForegroundWindow(_self);
         menu.IsOpen = true;
+    }
+
+    /// <summary>체크 표시로 현재 등록 상태를 보여 주고, 누르면 등록과 해제를 바꾼다.</summary>
+    private void AddAutoStart(ContextMenu menu)
+    {
+        var autoStart = AutoStart.ForCurrentProcess();
+        var item = new MenuItem { Header = "Windows 시작 시 자동 실행", IsCheckable = true, IsEnabled = autoStart.CanRegister };
+        try
+        {
+            item.IsChecked = autoStart.IsEnabled;
+        }
+        catch (System.Security.SecurityException)
+        {
+            item.IsEnabled = false;
+        }
+        item.Click += (_, _) =>
+        {
+            try
+            {
+                autoStart.SetEnabled(item.IsChecked);
+            }
+            catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException or InvalidOperationException)
+            {
+                Dialogs.Show(this, $"자동 실행 설정을 바꾸지 못했습니다.{Environment.NewLine}{ex.Message}");
+            }
+        };
+        menu.Items.Add(item);
     }
 
     private const uint SwpNoZOrder = 0x0004;
