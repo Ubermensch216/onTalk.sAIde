@@ -14,6 +14,7 @@ public partial class PanelWindow
     private ChatPane? _chatPane;
     private string? _chatPaneKey;
     private ConversationsPane? _conversationsPane;
+    private string _conversationsSaved = "";
     private void ApplyCurrentContext(WatchSnapshot snapshot)
     {
         if (_store is null || snapshot.AccountCandidate != _store.LoginId) return;
@@ -110,6 +111,13 @@ public partial class PanelWindow
         {
             _conversationsPane ??= new ConversationsPane();
             _conversationsPane.Refresh(current.Conversations);
+            // Home의 ‘최근 대화’가 이 목록을 쓸 수 있도록 마지막으로 읽은 대화방 목록을 보관한다. 같은 목록은 다시 쓰지 않는다.
+            var listed = string.Join("; ", current.Conversations.Select(i => i.Key + "|" + i.Label.Replace('\n', ' ')));
+            if (current.Conversations.Count > 0 && listed != _conversationsSaved)
+            {
+                _store.SaveHomeConversations(current.Conversations, DateTimeOffset.Now);
+                _conversationsSaved = listed;
+            }
             ChatHost.Content = _conversationsPane; ChatHost.Visibility = Visibility.Visible;
             EmptyState.Visibility = NoteView.Visibility = ComposeHost.Visibility = PeopleHost.Visibility = ContextView.Visibility = Visibility.Collapsed;
             return;

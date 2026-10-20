@@ -14,7 +14,7 @@ public sealed record StoredDraft(string Slot, string Body, DateTimeOffset Update
 /// </summary>
 public sealed partial class ProfileStore : IDisposable
 {
-    private const int SchemaVersion = 10;
+    private const int SchemaVersion = 11;
     private readonly SqliteConnection _db;
 
     public string LoginId { get; }
@@ -293,6 +293,15 @@ public sealed partial class ProfileStore : IDisposable
                 BEGIN;
                 CREATE TABLE personalized_work (id TEXT PRIMARY KEY, body TEXT NOT NULL, updated_at TEXT NOT NULL);
                 PRAGMA user_version = 10;
+                COMMIT;
+                """);
+        }
+        if (version < 11)
+        {
+            Execute(db, """
+                BEGIN;
+                CREATE TABLE IF NOT EXISTS home_conversation (id INTEGER PRIMARY KEY CHECK(id=1), list_json TEXT NOT NULL, observed_at TEXT NOT NULL);
+                PRAGMA user_version = 11;
                 COMMIT;
                 """);
         }

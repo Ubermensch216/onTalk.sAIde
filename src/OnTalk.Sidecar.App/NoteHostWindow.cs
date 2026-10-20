@@ -13,9 +13,41 @@ public enum NoteTab { Note, Personalized }
 /// <summary>
 /// 쪽지 보내기 창의 촘촘한 화면 값. 창은 900×900의 2/3(600×600)로 줄였고, 높이·여백은 그에 비례해 줄이되
 /// 글자와 누르는 칸은 읽고 누르기 어려워지지 않도록 덜 줄였다(글자 13→12, 단추·입력칸 32~34→22~26).
+/// 그래도 작게 느껴져 화면 전체에 최대 <see cref="MaxScale"/>배를 한 번에 건다. 화면 안의 모든 값은 기준 크기 그대로이고,
+/// 창이 그만큼 커져 글자·단추·여백·아이콘이 같은 비율로 커진다(레이아웃은 달라지지 않는다).
 /// </summary>
 internal static class Density
 {
+    /// <summary>화면 전체 확대 배율의 상한. 작업 영역이 모자라면 <see cref="Fit"/>이 이보다 낮춘다.</summary>
+    public const double MaxScale = 1.2;
+
+    /// <summary>이보다 낮추지는 않는다. 그래도 모자라면 창이 작업 영역에 맞춰지고 세로로 스크롤된다.</summary>
+    public const double MinScale = 1.0;
+
+    /// <summary>
+    /// 배율을 걸기 전의 배치 크기. 높이는 ‘쪽지’ 탭의 모든 구역(받는 사람·본문·첨부 파일·발송 방식)과 아래 단추 줄이
+    /// 스크롤 없이 한눈에 들어오는 값이다(두 사람을 받는 사람으로 넣은 경우를 잰 822에 여유를 더함).
+    /// 어느 탭으로 열든 같은 크기로 연다.
+    /// </summary>
+    public const double LayoutWidth = 504, LayoutHeight = 830, MinLayoutWidth = 400, MinLayoutHeight = 380;
+
+    /// <summary>창 틀(제목 줄과 테두리)이 차지하는 크기. 화면에 거는 배율과 무관하다.</summary>
+    public static (double Width, double Height) Frame =>
+        (2 * SystemParameters.ResizeFrameVerticalBorderWidth + 8,
+         SystemParameters.WindowCaptionHeight + 2 * SystemParameters.ResizeFrameHorizontalBorderHeight + 8);
+
+    /// <summary>작업 영역 안에 기본 크기가 다 들어가도록 정한 배율. 넉넉하면 <see cref="MaxScale"/>.</summary>
+    public static double Fit(double workWidth, double workHeight)
+    {
+        var (frameWidth, frameHeight) = Frame;
+        var fit = Math.Min((workWidth - 40 - frameWidth) / LayoutWidth, (workHeight - 40 - frameHeight) / LayoutHeight);
+        return Math.Clamp(fit, MinScale, MaxScale);
+    }
+
+    /// <summary>화면 뿌리에 확대를 건다. 배치가 확대된 뒤 기준 크기로 이루어져 레이아웃이 보존된다.</summary>
+    public static void ApplyScale(FrameworkElement root, double scale) =>
+        root.LayoutTransform = new System.Windows.Media.ScaleTransform(scale, scale);
+
     public static IEnumerable<KeyValuePair<string, object>> Compact { get; } =
     [
         new("CtlMinHeight", 26d), new("CtlPadding", new Thickness(10, 0, 10, 0)),
@@ -38,10 +70,14 @@ internal static class Density
 /// </summary>
 public sealed class NoteHostWindow : Window
 {
+    /// <summary>기본 창의 배율 전 배치 크기와 최대 배율(미리보기 검사용).</summary>
+    public const double DefaultLayoutWidth = Density.LayoutWidth, DefaultLayoutHeight = Density.LayoutHeight, MaxScale = Density.MaxScale;
+
     private readonly TabControl? _tabs;
     private readonly List<(TabItem? Tab, WorkPane Pane)> _items = [];
     private WorkPane? _current;
     private bool _reverting;
+    private double _scale = Density.MaxScale;
 
     /// <summary>쪽지 탭 화면. 개인별 쪽지만 담은 창에서는 null.</summary>
     public GroupNotePane? Note { get; }
@@ -80,6 +116,7 @@ public sealed class NoteHostWindow : Window
         _tabs.SelectedIndex = initial == NoteTab.Personalized ? 1 : 0;
         _current = _items[_tabs.SelectedIndex].Pane;
         _tabs.SelectionChanged += OnTabChanged;
+        Density.ApplyScale(_tabs, _scale);
         Content = _tabs;
         Hook();
     }
@@ -93,13 +130,21 @@ public sealed class NoteHostWindow : Window
         _items.Add((null, personalized));
         _current = personalized;
         Wire(personalized);
+        Density.ApplyScale(personalized, _scale);
         Content = personalized;
         Hook();
     }
 
     private void Configure()
     {
-        Width = 600; Height = Math.Min(600, SystemParameters.WorkArea.Height - 40); MinWidth = 540; MinHeight = 380;
+        // 쪽지 탭이 한눈에 들어오는 크기로 연다. 개인별 쪽지 탭으로 열어도 같은 크기다.
+        var work = SystemParameters.WorkArea;
+        _scale = Density.Fit(work.Width, work.Height);
+        var (frameWidth, frameHeight) = Density.Frame;
+        Width = Math.Min(Density.LayoutWidth * _scale + frameWidth, work.Width - 40);
+        Height = Math.Min(Density.LayoutHeight * _scale + frameHeight, work.Height - 40);
+        MinWidth = Math.Min(Density.MinLayoutWidth * _scale + frameWidth, Width);
+        MinHeight = Math.Min(Density.MinLayoutHeight * _scale + frameHeight, Height);
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Style = (Style)FindResource("AppWindow");
         FontSize = 12;

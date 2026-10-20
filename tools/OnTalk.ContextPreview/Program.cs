@@ -174,11 +174,26 @@ internal static class Program
         var hostTabs = (TabControl)host.Content;
         if (hostTabs.Items.Count != 2 || ((TabItem)hostTabs.Items[0]).Header as string != "쪽지" || ((TabItem)hostTabs.Items[1]).Header as string != "개인별 쪽지")
             throw new InvalidOperationException("쪽지 창 탭 이름이 맞지 않습니다.");
-        Render(hostTabs, Path.Combine(output, "note-host-note.png"), 600, 600);
-        Render(hostTabs, Path.Combine(output, "note-host-note-min.png"), 540, 380);
+        // 기본 창 크기 안에 쪽지 탭의 모든 구역이 스크롤 없이 들어가야 한다(받는 사람이 있을 때도, 없을 때도).
+        var clientWidth = (int)Math.Round(NoteHostWindow.DefaultLayoutWidth * NoteHostWindow.MaxScale);
+        var clientHeight = (int)Math.Round(NoteHostWindow.DefaultLayoutHeight * NoteHostWindow.MaxScale);
+        var emptyHost = new NoteHostWindow(store, preparationWriter, null, null, NoteTab.Note, new PreviewPersonalizedAutomation([]));
+        foreach (var (label, tabs) in new[] { ("받는 사람 2명", hostTabs), ("받는 사람 없음", (TabControl)emptyHost.Content) })
+        {
+            tabs.Measure(new Size(clientWidth, double.PositiveInfinity));
+            if (tabs.DesiredSize.Height > clientHeight)
+                throw new InvalidOperationException($"쪽지 창 기본 크기에 쪽지 탭이 다 들어가지 않습니다({label}: 필요 {tabs.DesiredSize.Height:0} > {clientHeight}).");
+        }
+        // 관리(설정) 창: 단축키 입력칸이 현재 조합을 보여 주는지 확인한다(전역 등록은 하지 않는다).
+        var manage = new ManageWindow(store, new AppSettings(), "합성", (_, _) => { }, () => { },
+            new HotkeyRegistration(() => IntPtr.Zero, new AppSettings()));
+        if (((TextBox)Get(manage, "HotkeyBox")).Text != "Ctrl+Shift+Space (사용 중이 아님)") throw new InvalidOperationException("관리 창 단축키 표시 오류");
+        Render((FrameworkElement)manage.Content, Path.Combine(output, "manage-hotkey.png"), 600, 1000);
+        Render(hostTabs, Path.Combine(output, "note-host-note.png"), clientWidth, clientHeight);
+        Render(hostTabs, Path.Combine(output, "note-host-note-min.png"), 648, 456);
         hostTabs.SelectedIndex = 1;
-        Render(hostTabs, Path.Combine(output, "note-host-personalized.png"), 600, 600);
-        Render(hostTabs, Path.Combine(output, "note-host-personalized-min.png"), 540, 380);
+        Render(hostTabs, Path.Combine(output, "note-host-personalized.png"), clientWidth, clientHeight);
+        Render(hostTabs, Path.Combine(output, "note-host-personalized-min.png"), 648, 456);
         var groupNote = new GroupNotePane(store, preparationWriter, new ContactPreparation([personA, personB], "온톡 조직도 선택", DateTimeOffset.Now),
             new PreviewPersonalizedAutomation([personA, personB]));
         var groupSend = (Button)Get(groupNote, "_sendButton");
@@ -302,6 +317,7 @@ internal static class Program
         store.FinishDispatch(dispatch1, DispatchStatus.WindowClosed, "");
         var dispatch2 = store.BeginDispatch([c.Name], "복지 사업 회의 안건 검토 요청드립니다.", now.AddDays(1).DateTime, now.AddDays(-1));
         store.FinishDispatch(dispatch2, DispatchStatus.WindowClosed, "");
+        store.SaveHomeConversations([new("c1", $"{c.Name} {c.Title}", "2", "회의 자료 확인 부탁드립니다."), new("c2", "전체 공지방", "12", "시스템 점검 안내")], now.AddMinutes(-10));
         using var home = new HomePane(store, ()=>{});
         home.Refresh(people); home.SetActive(true);
         if (home.Dashboard is not { Notes.Count:3, MessageCount:6, OpenTasks.Count:2 }) throw new InvalidOperationException("Home 합성 집계 오류");

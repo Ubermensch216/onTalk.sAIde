@@ -14,6 +14,9 @@ public sealed class AppSettings
     /// <summary>패널을 접어 두었는지. 다음 실행 때 같은 모양으로 시작한다.</summary>
     public bool Collapsed { get; set; }
 
+    /// <summary>패널 접기/펴기 단축키(<c>Ctrl+Shift+Space</c> 꼴). 비어 있으면 기본 조합을 쓴다.</summary>
+    public string HotkeyText { get; set; } = "";
+
     /// <summary>요약·할 일 후보·AI 초안에 쓰는 Ollama 모델. 비어 있으면 기본 모델을 쓴다.</summary>
     public string AnalysisModel { get; set; } = "";
 

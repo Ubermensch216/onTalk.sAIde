@@ -16,7 +16,7 @@
 | 확장 작성 | 보관 초안·수신자 검색/확인·예약 설정·별도 전송 확인 | 과거 쪽지 연동 확인. 작성창 닫힘과 배달 완료 구분 |
 | 검색·업무 | 문자/뜻 검색·업무 기한/완료/알림·대화 원문 출처 | 자동 테스트 중심, 실제 업무/알림 조작 확대 검증 필요 |
 | 첨부 | 사용자가 저장한 파일 가져오기·암호화·무결성·텍스트/Office 추출 | 합성 파일 검증. PDF/HWP/OCR 없음 |
-| 저장·AI | 계정별 SQLCipher·DPAPI·AES-GCM·암호 백업·루프백 Ollama·Home 원문/정리 연결 | 스키마 10. 계정/다른 PC/오프라인 전체 수용 검증 남음 |
+| 저장·AI | 계정별 SQLCipher·DPAPI·AES-GCM·암호 백업·루프백 Ollama·Home 원문/정리 연결 | 스키마 11. 계정/다른 PC/오프라인 전체 수용 검증 남음 |
 
 ## 최신 검증
 
@@ -37,7 +37,7 @@
 
 ## 실행·배포
 
-개발 실행: src/OnTalk.Sidecar.App/bin/Release/net10.0-windows/OnTalk.sAIde.exe. 배포 실행 파일: artifacts/OnTalk.sAIde-0.3.3-win-x64/OnTalk.sAIde.exe. 같은 이름의 ZIP은 런타임·문서·이미지를 포함한다. 저장소는 스키마 10이며 이전 DB 사본을 남긴다. 구버전과 저장소 혼용을 피한다.
+개발 실행: src/OnTalk.Sidecar.App/bin/Release/net10.0-windows/OnTalk.sAIde.exe. 배포 실행 파일: artifacts/OnTalk.sAIde-0.3.3-win-x64/OnTalk.sAIde.exe. 같은 이름의 ZIP은 런타임·문서·이미지를 포함한다. 저장소는 스키마 11이며 이전 DB 사본을 남긴다. 구버전과 저장소 혼용을 피한다.
 
 ## 초기 0.1 프리뷰 기록 (역사적 자료)
 

@@ -23,7 +23,6 @@ public partial class PanelWindow : Window
     private const double RailHeightDip = 180;
     // 접힌 도구를 온톡 창 위에 겹쳐 놓을 때 온톡의 창 단추를 가리지 않도록 내려 놓는 거리.
     private const double RailOverlapInsetDip = 96;
-    private const int HotKeyId = 1;
 
     private readonly NoteWatcher _watcher = new();
     private readonly OnTalkDock _dock = new();
@@ -54,6 +53,7 @@ public partial class PanelWindow : Window
     // 사용자가 직접 열었으면 온톡을 다시 쓰기 전까지는 다른 앱을 써도 숨기지 않는다.
     private bool _pinnedOpen = true;
     private bool? _railShown;
+    private HotkeyRegistration? _hotkey;
     private string? _shownKey;
     private ReceivedNote? _shownNote;
     private long? _shownNoteId;
@@ -90,7 +90,10 @@ public partial class PanelWindow : Window
             _self = new WindowInteropHelper(this).Handle;
             _source = HwndSource.FromHwnd(_self);
             _source?.AddHook(OnWindowMessage);
-            RegisterHotKey(_self, HotKeyId, ModControl | ModShift | ModNoRepeat, VkSpace);
+            _hotkey = new HotkeyRegistration(() => _self, _settings);
+            _hotkey.Changed += ShowHotkeyText;
+            _hotkey.Register();
+            ShowHotkeyText();
             _tray = new TrayIcon(_self);
             // 알림 영역을 쓸 수 없으면 패널을 숨기지 않으므로 작업 표시줄에서 찾을 수 있게 한다.
             ShowInTaskbar = !_tray.IsAvailable;
@@ -121,7 +124,7 @@ public partial class PanelWindow : Window
             _reminders.Stop();
             if (_self != IntPtr.Zero)
             {
-                UnregisterHotKey(_self, HotKeyId);
+                _hotkey?.Unregister();
             }
             _source?.RemoveHook(OnWindowMessage);
             _tray?.Dispose();
@@ -278,7 +281,7 @@ public partial class PanelWindow : Window
         _notesPane?.Dispose(); _notesPane = null;
         _peoplePaneKey = null;
         PeopleHost.Content = null;
-        _chatPane?.Dispose(); _chatPane = null; _chatPaneKey = null; _conversationsPane = null;
+        _chatPane?.Dispose(); _chatPane = null; _chatPaneKey = null; _conversationsPane = null; _conversationsSaved = "";
         ChatHost.Content = null;
         _context = null;
         _contextViewKey = null;
@@ -301,7 +304,7 @@ public partial class PanelWindow : Window
         }
         if (_manageWindow is null)
         {
-            _manageWindow = new ManageWindow(_store, _settings, _onTalkVersion, RestoreBackup, DeleteAllData) { Owner = this };
+            _manageWindow = new ManageWindow(_store, _settings, _onTalkVersion, RestoreBackup, DeleteAllData, _hotkey!) { Owner = this };
             _manageWindow.Closed += (_, _) => _manageWindow = null;
             ShowWorkWindow(_manageWindow);
         }
@@ -959,6 +962,36 @@ public partial class PanelWindow : Window
         FollowDock();
     }
 
+    /// <summary>
+    /// 단축키를 누를 때마다 접힘과 펼침을 바꾼다. 펼쳐져 보이는 중이면 접힌 도구로 줄이고(도구는 계속 보인다),
+    /// 접혀 있거나 숨어 있으면 펼쳐서 보여 준다.
+    /// </summary>
+    private void ToggleByHotkey()
+    {
+        if (IsVisible && _railShown == false)
+        {
+            // Collapse()와 같되, 다른 프로그램을 쓰는 중에 접어도 도구가 사라지지 않게 한다.
+            // 온톡으로 돌아오면 원래 규칙으로 돌아간다.
+            _collapsed = true;
+            _forceExpanded = false;
+            _pinnedOpen = true;
+            SaveCollapsed();
+            FollowDock();
+        }
+        else
+        {
+            Reveal();
+        }
+    }
+
+    /// <summary>설정한 단축키를 하단 안내와 접힌 도구의 설명에 적는다. 다른 프로그램이 쓰는 조합이면 그렇게 알린다.</summary>
+    private void ShowHotkeyText()
+    {
+        var text = _hotkey is null ? "" : _hotkey.Active ? _hotkey.Current.Format() : "단축키 사용 불가";
+        HotkeyHint.Text = text;
+        ExpandButton.ToolTip = _hotkey?.Active == true ? "패널 펼치기 · " + text : "패널 펼치기";
+    }
+
     /// <summary>단축키나 알림 영역 아이콘으로 불렀을 때. 숨어 있어도 펼쳐서 보여 준다.</summary>
     private void Reveal()
     {
@@ -1006,9 +1039,9 @@ public partial class PanelWindow : Window
 
     private IntPtr OnWindowMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (message == WmHotKey && wParam.ToInt32() == HotKeyId)
+        if (message == WmHotKey && wParam.ToInt32() == HotkeyRegistration.Id)
         {
-            Reveal();
+            ToggleByHotkey();
             handled = true;
         }
         else if (message == TrayIcon.CallbackMessage)
@@ -1078,20 +1111,10 @@ public partial class PanelWindow : Window
     private const int WmHotKey = 0x0312;
     private const int WmLButtonUp = 0x0202;
     private const int WmRButtonUp = 0x0205;
-    private const uint ModControl = 0x0002;
-    private const uint ModShift = 0x0004;
-    private const uint ModNoRepeat = 0x4000;
-    private const uint VkSpace = 0x20;
 
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hwnd);
-
-    [DllImport("user32.dll")]
-    private static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
-
-    [DllImport("user32.dll")]
-    private static extern bool UnregisterHotKey(IntPtr hwnd, int id);
 }

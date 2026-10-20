@@ -8,7 +8,7 @@
                 BorderThickness="0,0,0,1" Padding="24,16">
             <StackPanel MaxWidth="760">
                 <TextBlock Text="관리" Style="{StaticResource PageTitle}" />
-                <TextBlock Text="보관 자료, 백업, 로컬 AI 모델을 다룹니다." Style="{StaticResource Small}" Margin="0,2,0,0" />
+                <TextBlock Text="보관 자료, 백업, 로컬 AI 모델, 단축키를 다룹니다." Style="{StaticResource Small}" Margin="0,2,0,0" />
             </StackPanel>
         </Border>
         <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -18,6 +18,27 @@
                     <StackPanel>
                         <TextBlock Text="보관 자료" Style="{StaticResource SectionTitle}" />
                         <TextBlock x:Name="InfoText" Style="{StaticResource Small}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource Card}" Padding="18">
+                    <StackPanel>
+                        <TextBlock Text="단축키" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Style="{StaticResource Small}" Margin="0,0,0,12"
+                                   Text="누를 때마다 패널이 접혔다 펴집니다. 아래 칸을 누른 뒤 원하는 키 조합을 누르면 키가 입력되는 대로 보이고, 마지막 키를 누르면 바로 적용됩니다. Ctrl·Alt·Win 중 하나는 꼭 함께 눌러야 합니다." />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="84" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="접기·펴기" VerticalAlignment="Center" />
+                            <TextBox x:Name="HotkeyBox" Grid.Column="1" IsReadOnly="True" IsReadOnlyCaretVisible="False"
+                                     IsUndoEnabled="False" Cursor="Arrow" FontWeight="SemiBold"
+                                     AutomationProperties.Name="접기 펴기 단축키 입력" ContextMenu="{x:Null}" />
+                            <Button Grid.Column="2" Content="기본값" Margin="8,0,0,0" Click="OnResetHotkey" />
+                        </Grid>
+                        <TextBlock x:Name="HotkeyStatus" Style="{StaticResource StatusLine}" Margin="0,10,0,0" />
                     </StackPanel>
                 </Border>
 

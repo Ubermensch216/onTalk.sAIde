@@ -19,6 +19,23 @@ public sealed partial class ProfileStore
         return cmd.ExecuteScalar() is string json ? JsonSerializer.Deserialize<PeopleSnapshot>(json) : null;
     }
 
+    /// <summary>‘대화’ 메뉴에서 읽은 대화방 목록의 최신본을 보관한다. 비어 있는 읽기(로딩 중)는 이전 목록을 지우지 않는다.</summary>
+    public void SaveHomeConversations(IReadOnlyList<ConversationItem> items, DateTimeOffset at)
+    {
+        if (items.Count == 0) return;
+        using var cmd = Command("INSERT OR REPLACE INTO home_conversation(id,list_json,observed_at) VALUES(1,$json,$at)",
+            ("$json", JsonSerializer.Serialize(items)), ("$at", at.ToString("O")));
+        cmd.ExecuteNonQuery();
+    }
+
+    public ObservedConversations? GetHomeConversations()
+    {
+        using var cmd = Command("SELECT list_json,observed_at FROM home_conversation WHERE id=1");
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() && JsonSerializer.Deserialize<List<ConversationItem>>(reader.GetString(0)) is { } items
+            ? new ObservedConversations(items, DateTimeOffset.Parse(reader.GetString(1))) : null;
+    }
+
     public long SaveHomeChat(ContactPerson person, ChatSnapshot source, ChatAnalysis analysis, DateTimeOffset at)
     {
         if (source.Messages.Count == 0 || source.Messages.Count > 80 || source.Messages.Sum(m => m.Body.Length) > 12000 ||

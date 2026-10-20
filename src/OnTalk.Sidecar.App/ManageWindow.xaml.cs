@@ -1,6 +1,7 @@
 using System.IO;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using OnTalk.Sidecar.AI;
 using OnTalk.Sidecar.Core;
@@ -32,8 +33,10 @@ public partial class ManageWindow : Window
     private readonly AppSettings _settings;
     private readonly Action<string, string> _restore;
     private readonly Action _deleteAll;
+    private readonly HotkeyRegistration _hotkey;
 
-    public ManageWindow(ProfileStore store, AppSettings settings, string? onTalkVersion, Action<string, string> restore, Action deleteAll)
+    public ManageWindow(ProfileStore store, AppSettings settings, string? onTalkVersion, Action<string, string> restore, Action deleteAll,
+        HotkeyRegistration hotkey)
     {
         InitializeComponent();
         _store = store;
@@ -42,6 +45,13 @@ public partial class ManageWindow : Window
         EmbeddingModelBox.Text = settings.EmbeddingModel is { Length: > 0 } embedding ? embedding : OllamaModels.DefaultEmbedding;
         _restore = restore;
         _deleteAll = deleteAll;
+        _hotkey = hotkey;
+        HotkeyBox.PreviewKeyDown += OnHotkeyKeyDown;
+        HotkeyBox.PreviewKeyUp += OnHotkeyKeyUp;
+        HotkeyBox.GotKeyboardFocus += (_, _) => BeginHotkeyInput();
+        HotkeyBox.LostKeyboardFocus += (_, _) => EndHotkeyInput();
+        Closed += (_, _) => { if (_capturing) EndHotkeyInput(); };
+        ShowCurrentHotkey();
         var range = store.GetCollectionRange();
         var version = Assembly.GetExecutingAssembly().GetName().Version;
         InfoText.Text =
@@ -52,6 +62,108 @@ public partial class ManageWindow : Window
         var records = store.GetDispatches().Select(r => new DispatchRow(r)).ToList();
         DispatchList.ItemsSource = records;
         NoDispatchText.Visibility = records.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private bool _capturing;
+
+    private void ShowCurrentHotkey() =>
+        HotkeyBox.Text = _hotkey.Active ? _hotkey.Current.Format() : _hotkey.Current.Format() + " (사용 중이 아님)";
+
+    private void HotkeyMessage(string text, bool ok)
+    {
+        HotkeyStatus.Text = text;
+        HotkeyStatus.Foreground = ok ? UiBrushes.AccentText : UiBrushes.Danger;
+    }
+
+    /// <summary>입력칸에 들어오면 지금 쓰는 단축키도 입력칸으로 들어오도록 전역 등록을 풀고 안내를 보인다.</summary>
+    private void BeginHotkeyInput()
+    {
+        if (_capturing) return;
+        _capturing = true;
+        _hotkey.Suspend();
+        HotkeyBox.Text = "키 조합을 누르세요…";
+        HotkeyMessage("", ok: true);
+    }
+
+    private void EndHotkeyInput()
+    {
+        if (!_capturing) return;
+        _capturing = false;
+        _hotkey.Resume();
+        ShowCurrentHotkey();
+    }
+
+    private static uint HeldModifiers()
+    {
+        var held = Keyboard.Modifiers;
+        return (held.HasFlag(ModifierKeys.Control) ? Hotkey.Control : 0) | (held.HasFlag(ModifierKeys.Alt) ? Hotkey.Alt : 0) |
+            (held.HasFlag(ModifierKeys.Shift) ? Hotkey.Shift : 0) | (held.HasFlag(ModifierKeys.Windows) ? Hotkey.Win : 0);
+    }
+
+    private static bool IsModifierKey(Key key) => key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or
+        Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin;
+
+    /// <summary>눌린 수정키를 입력칸에 그대로 보인다. 아직 마지막 키가 아니므로 뒤에 …을 붙인다.</summary>
+    private void ShowHeld()
+    {
+        var held = Hotkey.FormatModifiers(HeldModifiers());
+        HotkeyBox.Text = held.Length == 0 ? "키 조합을 누르세요…" : held + "+…";
+    }
+
+    private void LeaveHotkeyBox()
+    {
+        Keyboard.ClearFocus();
+        Focus();
+    }
+
+    private void OnHotkeyKeyDown(object sender, KeyEventArgs e)
+    {
+        if (!_capturing) return;
+        // Alt 조합은 SystemKey로, IME가 켜져 있으면 ImeProcessedKey로 들어온다.
+        var key = e.Key switch { Key.System => e.SystemKey, Key.ImeProcessed => e.ImeProcessedKey, _ => e.Key };
+        var modifiers = HeldModifiers();
+        if (key == Key.Tab && (modifiers & (Hotkey.Control | Hotkey.Alt | Hotkey.Win)) == 0) return; // 칸 이동은 그대로 둔다.
+        e.Handled = true;
+        if (key == Key.Escape && modifiers == 0)
+        {
+            HotkeyMessage("바꾸지 않았습니다.", ok: true);
+            LeaveHotkeyBox();
+            return;
+        }
+        if (IsModifierKey(key)) { ShowHeld(); return; }
+        var virtualKey = (uint)KeyInterop.VirtualKeyFromKey(key);
+        var gesture = new Hotkey(modifiers, virtualKey);
+        // 눌린 모양을 키가 들어오는 즉시 보인다.
+        var held = Hotkey.FormatModifiers(modifiers);
+        var name = Hotkey.KeyName(virtualKey) ?? "?";
+        HotkeyBox.Text = held.Length > 0 ? held + "+" + name : name;
+        if (gesture.Problem is { } problem)
+        {
+            // 쓸 수 없는 조합이면 눌린 모양과 이유를 보이고 다시 받는다.
+            HotkeyMessage(problem, ok: false);
+            return;
+        }
+        // 마지막 키까지 입력되었으므로 바로 적용한다. TryApply가 이미 전역 등록을 마치므로 Resume을 거치지 않는다.
+        var error = _hotkey.TryApply(gesture);
+        _capturing = false;
+        ShowCurrentHotkey();
+        HotkeyMessage(error ?? $"{gesture.Format()}(으)로 설정했습니다. 이제 이 키를 누를 때마다 패널이 접히고 펴집니다.", error is null);
+        LeaveHotkeyBox();
+    }
+
+    private void OnHotkeyKeyUp(object sender, KeyEventArgs e)
+    {
+        if (!_capturing) return;
+        e.Handled = true;
+        var key = e.Key switch { Key.System => e.SystemKey, Key.ImeProcessed => e.ImeProcessedKey, _ => e.Key };
+        if (IsModifierKey(key)) ShowHeld(); // 마지막 키 없이 수정키를 뗀 경우도 그대로 보인다.
+    }
+
+    private void OnResetHotkey(object sender, RoutedEventArgs e)
+    {
+        var error = _hotkey.TryApply(Hotkey.Default);
+        ShowCurrentHotkey();
+        HotkeyMessage(error ?? $"기본값 {Hotkey.Default.Format()}(으)로 되돌렸습니다.", error is null);
     }
 
     private void Status(string text, bool ok)

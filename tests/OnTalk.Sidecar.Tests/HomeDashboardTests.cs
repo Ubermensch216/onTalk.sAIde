@@ -76,6 +76,29 @@ public sealed class HomeDashboardTests : IDisposable
     }
 
     [Fact]
+    public void 대화_메뉴에서_읽은_방_목록을_보관하고_친구_이름이_일치하는_방만_최근_대화에_보여준다()
+    {
+        var list = new ConversationItem[] { new("1", "김민경 주무관", "3", "점검 자료 보내 주세요"), new("2", "다른 사람", "1", "안녕하세요"), new("3", "김민경", "2", "") };
+        using (var store = ProfileStore.Open(_root, "a"))
+        {
+            Assert.Null(store.GetHomeConversations());
+            store.SaveHomeConversations(list, Now.AddHours(-2));
+            store.SaveHomeConversations([], Now); // 목록 로딩 중의 빈 읽기는 보관본을 지우지 않는다.
+        }
+        using var reopened = ProfileStore.Open(_root, "a");
+        var seen = reopened.GetHomeConversations()!;
+        Assert.Equal(3, seen.Items.Count); Assert.Equal(Now.AddHours(-2), seen.ObservedAt);
+        var rooms = HomeConversations.Match([A], seen, Now, 7);
+        Assert.Equal(["김민경 주무관", "김민경"], rooms.Select(r => r.Item.Name));
+        Assert.All(rooms, r => Assert.False(r.SameName));
+        Assert.True(HomeConversations.Match([A, B], seen, Now, 7).All(r => r.SameName));
+        Assert.Empty(HomeConversations.Match([new("x", "박철수", "주무관", ["총무과"])], seen, Now, 7));
+        Assert.Empty(HomeConversations.Match([A], seen, Now.AddDays(30), 7)); // 기간 밖
+        Assert.Equal(2, HomeConversations.Match([A], seen, Now.AddDays(30), null).Count);
+        using var other = ProfileStore.Open(_root, "b"); Assert.Null(other.GetHomeConversations());
+    }
+
+    [Fact]
     public void 대화근거를_검증하고_재시작과_계정격리와_연결해제를_지원한다()
     {
         long id;

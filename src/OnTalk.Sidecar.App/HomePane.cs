@@ -17,7 +17,7 @@ public sealed class HomePane : UserControl, IDisposable
     private readonly Action<ContactPreparation>? _openNote;
     private readonly ComboBox _groups = new(), _friends = new();
     private readonly StackPanel _body = new(), _periods = new() { Orientation = Orientation.Horizontal };
-    private readonly TextBlock _scope = new(), _chosen = new(), _groupStatus = new();
+    private readonly TextBlock _scope = new(), _chosen = new(), _groupStatus = new(), _summary = new();
     private readonly Button _groupChat = new() { Content = "대화" }, _groupNote = new() { Content = "쪽지" };
     private bool _opening;
     private readonly ScrollViewer _scroll;
@@ -40,7 +40,7 @@ public sealed class HomePane : UserControl, IDisposable
         Background = Brush("PageBg"); Foreground = Brush("TextStrong"); FontFamily = new FontFamily("Malgun Gothic"); FontSize = 13;
         var root = new StackPanel { Margin = new Thickness(12) };
         root.Children.Add(Text("그룹별 소통 정리", "PageTitle"));
-        root.Children.Add(Text("최근 쪽지 5 · 최근 대화 3 · 최근 업무 3", "Small"));
+        _summary.Style = (Style)FindResource("Small"); _summary.TextWrapping = TextWrapping.Wrap; _summary.Margin = new Thickness(0, 3, 0, 3); root.Children.Add(_summary);
         root.Children.Add(GroupActions());
         var filters = new Grid { Margin = new Thickness(0, 10, 0, 8) };
         filters.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
@@ -224,7 +224,9 @@ public sealed class HomePane : UserControl, IDisposable
         var people = FilteredPeople;
         var data = Dashboard = _store.GetHomeDashboard(people, now, _days);
         var history = GroupHistory.Build(people, _store.GetDispatches(500), now, _days);
-        var signature = JsonSerializer.Serialize(data) + JsonSerializer.Serialize(history) + HomeDashboard.Day(now);
+        var seen = _store.GetHomeConversations();
+        var rooms = HomeConversations.Match(people, seen, now, _days);
+        var signature = JsonSerializer.Serialize(data) + JsonSerializer.Serialize(history) + JsonSerializer.Serialize(rooms) + HomeDashboard.Day(now);
         if (skipUnchanged && signature == _dataSignature) return;
         _dataSignature = signature;
         _body.Children.Clear();
@@ -235,11 +237,15 @@ public sealed class HomePane : UserControl, IDisposable
               (scope?.DeclaredCount is { } declared ? $" / 그룹 표시 {declared}명" : "");
         if (people.Count == 0)
         {
+            _summary.Text = "";
             _body.Children.Add(Card(Text("친구 그룹을 펼쳐 주세요", "SectionTitle"), Text("온톡 Home에서 친구가 표시되면 해당 그룹의 쪽지 발송 이력과 대화 요약을 모아 보여드립니다.", "Small")));
             return;
         }
-        RenderNotes(RecentNote.Build(data, history), history, now);
-        RenderChats(data, people);
+        var notes = RecentNote.Build(data, history);
+        // 위쪽 현황은 아래 카드에 실제로 있는 기록 수와 같아야 한다(카드마다 먼저 보여 주는 개수와는 별개다).
+        _summary.Text = $"쪽지 {notes.Count} · 대화 {data.Chats.Count + rooms.Count} · 열린 업무 {data.OpenTasks.Count}  (선택한 기간 안의 기록)";
+        RenderNotes(notes, history, now);
+        RenderChats(data, rooms, seen, people);
         RenderAttention(data, now);
     }
     private void RenderNotes(IReadOnlyList<RecentNote> notes, GroupHistory history, DateTimeOffset now)
@@ -330,12 +336,17 @@ public sealed class HomePane : UserControl, IDisposable
         if (data.OpenTasks.Count > 3) content.Children.Add(Text($"외 {data.OpenTasks.Count - 3}건은 업무 목록에서 확인", "Caption"));
         _body.Children.Add(Collapsible("tasks", top, content));
     }
-    private void RenderChats(HomeDashboard data, IReadOnlyList<ContactPerson> people)
+    private void RenderChats(HomeDashboard data, IReadOnlyList<HomeConversation> rooms, ObservedConversations? seen, IReadOnlyList<ContactPerson> people)
     {
-        var content = new StackPanel(); var header = Section("최근 대화", data.Chats.Count);
-        if (data.Chats.Count == 0)
+        var content = new StackPanel(); var header = Section("최근 대화", data.Chats.Count + rooms.Count);
+        if (data.Chats.Count == 0 && rooms.Count == 0)
         {
             content.Children.Add(Text("최근에 어떤 이야기를 나눴나요?", "Body"));
+            // 비어 있는 이유를 구분해 알려 준다: 목록을 아직 못 읽었는지, 읽었지만 이름이 안 맞는지, 기간 밖인지.
+            content.Children.Add(Text(seen is null
+                ? "온톡의 ‘대화’ 메뉴를 한 번 열면 이름이 일치하는 대화방을 여기에 보여 드립니다."
+                : $"대화 목록 {seen.Items.Count}개를 {seen.ObservedAt.ToOffset(KoreanNoteTime.SeoulOffset):MM.dd HH:mm}에 확인했지만 선택한 친구와 이름이 일치하는 방이 없습니다. 방 이름이 친구 이름과 다르면 대화방을 열어 흐름을 정리한 뒤 친구에 연결하세요."
+                    + (_days is not null ? " 기간을 ‘전체’로 바꿔 보세요." : ""), "Small"));
         }
         foreach (var chat in data.Chats.Take(3))
         {
@@ -349,7 +360,19 @@ public sealed class HomePane : UserControl, IDisposable
         }
         AddMore(content, data.Chats.Skip(3).Select(chat => Link(ContactNames(chat.ContactIdentities, people) + " · " + chat.Source.RoomHint,
             () => ShowChat(chat, people))), "이전 대화 정리");
+        // 대화 메뉴 목록에서 읽은 방. 미리보기만으로 요약하지 않고, 이름이 일치한 방임을 그대로 밝힌다.
+        foreach (var room in rooms.Take(3)) content.Children.Add(RoomRow(room));
+        AddMore(content, rooms.Skip(3).Select(RoomRow), "이전 대화방");
         _body.Children.Add(Collapsible("chats", header, content));
+    }
+    private UIElement RoomRow(HomeConversation room)
+    {
+        var row = new StackPanel { Margin = new Thickness(0, 2, 0, 8) };
+        row.Children.Add(Text(room.Item.Name, "SectionTitle"));
+        row.Children.Add(Text(room.Item.Preview.Length == 0 ? "표시된 글 없음" : Snippet.Brief(room.Item.Preview), "Body"));
+        row.Children.Add(Text($"대화 목록 미리보기 · {string.Join(", ", room.People.Select(p => p.Name))} 이름 일치" +
+            (room.SameName ? " · 동명이인 확인 필요" : "") + $" · {room.ObservedAt.ToOffset(KoreanNoteTime.SeoulOffset):MM.dd HH:mm} 목록 확인", "Caption"));
+        return row;
     }
     private void ShowChat(HomeChatDigest chat, IReadOnlyList<ContactPerson> people)
     {
