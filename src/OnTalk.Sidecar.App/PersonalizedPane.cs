@@ -17,7 +17,7 @@ namespace OnTalk.Sidecar.App;
 /// 발송 단추는 항상 보이는 아래 줄에 둔다.
 /// Saved work contains recipient snapshots and per-person bodies, never a shared personalized recipient list.
 /// </summary>
-public sealed class PersonalizedWindow : Window
+public sealed class PersonalizedPane : WorkPane
 {
     private readonly ProfileStore _store;
     private readonly OllamaWriter _writer;
@@ -84,8 +84,9 @@ public sealed class PersonalizedWindow : Window
     private bool _savedExpanded;
     private readonly Dictionary<string, (TextBlock Count, ProgressBar Bar)> _headerCounters = [];
     private string _cleanSnapshot = "";
+    private readonly IReadOnlyList<ContactPerson> _initialPeople;
 
-    public PersonalizedWindow(
+    public PersonalizedPane(
         ProfileStore store,
         OllamaWriter writer,
         IReadOnlyList<ContactPerson> people,
@@ -94,14 +95,8 @@ public sealed class PersonalizedWindow : Window
         IPersonalizedAutomation? automation = null)
     {
         (_store, _writer, _prepare, _automation) = (store, writer, prepare, automation ?? OnTalkPersonalizedAutomation.Instance);
-        _work = new()
-        {
-            Template = template,
-            Headers = NotePersonalization.ExtractVariables(template).Count > 0
-                ? NotePersonalization.ExtractVariables(template).ToList()
-                : [PersonalizedWork.DefaultHeader],
-            Items = people.Select(p => new PersonalizedWorkItem { Person = p }).ToList()
-        };
+        _initialPeople = people;
+        _work = NewWork(people, template);
         EnsureHeaders();
         InitializeReservationControls();
         _undoButton = new Button
@@ -116,9 +111,7 @@ public sealed class PersonalizedWindow : Window
         };
         _undoButton.Click += (_, _) => UndoAi();
 
-        Title ="개인별 쪽지 · 작성과 미리보기"; Width = 900; Height = 900; MinWidth = 700; MinHeight = 560;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Style = (Style)FindResource("AppWindow");
+        Title = "개인별 쪽지";
         StyleControls();
 
         _reservePickers = BuildReservationPickers();
@@ -158,11 +151,36 @@ public sealed class PersonalizedWindow : Window
                 e.Handled = true;
             }
         };
-        Activated += (_, _) => { if (_batchCts is null) { FlushPreview(); Commit(); RefreshGrid(); ShowPreview(); } };
-        Closing += (_, e) => { if (!_closed && !ConfirmLeave("개인별 쪽지 닫기", "닫습니다.")) e.Cancel = true; };
-        Closed += (_, _) => { _batchCts?.Cancel(); _closed = true; _closing.Cancel(); };
         Load();
         SetSavedExpanded(_saved.Items.Count > 0);   // 저장한 작업이 없으면 접어 둔다.
+    }
+
+    private static PersonalizedWork NewWork(IReadOnlyList<ContactPerson> people, string template) => new()
+    {
+        Template = template,
+        Headers = NotePersonalization.ExtractVariables(template).Count > 0
+            ? NotePersonalization.ExtractVariables(template).ToList()
+            : [PersonalizedWork.DefaultHeader],
+        Items = people.Select(p => new PersonalizedWorkItem { Person = p }).ToList()
+    };
+
+    internal override bool IsBusy => _batchCts is not null || _running;
+
+    internal override void HostActivated()
+    {
+        if (_batchCts is null) { FlushPreview(); Commit(); RefreshGrid(); ShowPreview(); }
+    }
+
+    internal override bool QueryClose() => _closed || ConfirmLeave("개인별 쪽지 닫기", "닫습니다.");
+
+    internal override void HostClosed() { _batchCts?.Cancel(); _closed = true; _closing.Cancel(); }
+
+    /// <summary>열려 있던 작업이 저장소에서 지워졌다. 창은 닫지 않고, 같은 대상자로 서식과 값이 빈 새 작업을 시작한다.</summary>
+    private void StartFreshWork()
+    {
+        _work = NewWork(_initialPeople, "");
+        _shown = null;
+        Load();
     }
 
     // ───────────────────────── 화면 구성 ─────────────────────────
@@ -273,9 +291,9 @@ public sealed class PersonalizedWindow : Window
         var current = work.Id == _work.Id;
         var prompt = $"저장한 작업을 삭제할까요?\n\n  {work.Headline}\n  {work.Detail}\n\n입력 데이터와 본문이 삭제되며 발송 기록은 유지됩니다." +
             (current ? "\n지금 열려 있는 작업이라 이 창도 닫힙니다." : "");
-        if (Dialogs.Show(this, prompt, "저장 작업 삭제", MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
+        if (Dialogs.Show(Host, prompt, "저장 작업 삭제", MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
         _store.DeletePersonalizedWork(id);
-        if (current) { _closed = true; Close(); return; }
+        if (current) { StartFreshWork(); _status.Text = $"저장 작업 ‘{work.Headline}’을 삭제하고 새 작업으로 바꿨습니다."; return; }
         _saved.IsDropDownOpen = false;
         ReloadSaved();
         _status.Text = $"저장 작업 ‘{work.Headline}’을 삭제했습니다.";
@@ -315,7 +333,6 @@ public sealed class PersonalizedWindow : Window
     private UIElement BuildHeader()
     {
         var page = new StackPanel();
-        page.Children.Add(new TextBlock { Text = "개인별 쪽지", Style = Res<Style>("PageTitle"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 0, 12) });
 
         // ‘저장한 작업’은 제목과 떼어 접고 펼 수 있는 따로의 구역으로 둔다.
         var toggleContent = new StackPanel { Orientation = Orientation.Horizontal };
@@ -349,9 +366,9 @@ public sealed class PersonalizedWindow : Window
         Grid.SetColumn(load, 1); saved.Children.Add(load);
         var delete = SmallBtn("현재 작업 삭제", (_, _) =>
         {
-            if (Dialogs.Show(this, "저장한 개인화 작업과 입력 데이터·본문을 삭제할까요? 발송 기록은 유지됩니다.", "개인화 작업 삭제", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
-            _store.DeletePersonalizedWork(_work.Id); _closed = true; Close();
-        }, "지금 열려 있는 작업을 저장소에서 지우고 창을 닫습니다.");
+            if (Dialogs.Show(Host, "저장한 개인화 작업과 입력 데이터·본문을 삭제할까요? 발송 기록은 유지됩니다.", "개인화 작업 삭제", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+            _store.DeletePersonalizedWork(_work.Id); StartFreshWork(); _status.Text = "저장한 작업을 삭제하고 새 작업으로 바꿨습니다.";
+        }, "지금 열려 있는 작업을 저장소에서 지우고 서식과 입력 값이 빈 새 작업으로 바꿉니다.");
         delete.Style = Res<Style>("DangerButton"); delete.MinHeight = 26; delete.Padding = new Thickness(10, 0, 10, 0); delete.FontSize = 12; delete.Margin = new Thickness(0);
         var clean = SmallBtn("표시 없는 작업 정리", (_, _) => CleanUnmarkedWorks(),
             "‘임시 저장’ 표시도 발송 기록도 없는 저장 작업(이전 버전이 창을 닫을 때 자동 저장한 것 등)을 한꺼번에 지웁니다.");
@@ -468,7 +485,7 @@ public sealed class PersonalizedWindow : Window
                 if (!NotePersonalization.IsValidBody(item.Body))
                 { _status.Text = "본문의 빈 값·미완성 변수·4000바이트 초과를 먼저 수정하세요."; return; }
                 SetBatchRunning(true);
-                try { await _prepare(_work, item); if (!_closed && item.Status == "작성 중 · 미발송") { Hide(); Owner?.Activate(); } }
+                try { await _prepare(_work, item); if (!_closed && item.Status == "작성 중 · 미발송") { HideHost(); } }
                 finally { if (!_closed) { SetBatchRunning(false); RefreshGrid(); } }
             }, "자동 발송 대신 온톡 쪽지 작성창에 이 사람의 수신자·본문만 채워 두고, 직접 확인해 전송합니다."));
         body.Children.Add(nav);
@@ -572,7 +589,7 @@ public sealed class PersonalizedWindow : Window
     private void OnPickAttachments()
     {
         var dialog = new Microsoft.Win32.OpenFileDialog { Title = "첨부할 파일 선택", Multiselect = true, CheckFileExists = true };
-        if (dialog.ShowDialog(this) == true) AddAttachments(dialog.FileNames);
+        if (dialog.ShowDialog(Host) == true) AddAttachments(dialog.FileNames);
     }
 
     private void AddAttachments(IEnumerable<string> files)
@@ -689,7 +706,7 @@ public sealed class PersonalizedWindow : Window
     {
         if (_applyingTemplate || _templates.SelectedItem is not TemplateRecord chosen) return;
         if (_template.Text.Trim().Length > 0 && _template.Text != chosen.Body &&
-            Dialogs.Show(this, $"현재 서식 내용을 ‘{chosen.Name}’ 서식으로 바꿀까요?\n(만들어 둔 개인별 본문은 ‘서식으로 본문 생성’을 누를 때까지 바뀌지 않습니다.)", "서식 불러오기", MessageBoxButton.OKCancel) != MessageBoxResult.OK)
+            Dialogs.Show(Host, $"현재 서식 내용을 ‘{chosen.Name}’ 서식으로 바꿀까요?\n(만들어 둔 개인별 본문은 ‘서식으로 본문 생성’을 누를 때까지 바뀌지 않습니다.)", "서식 불러오기", MessageBoxButton.OKCancel) != MessageBoxResult.OK)
         {
             _applyingTemplate = true;
             try { _templates.SelectedItem = ((IEnumerable<TemplateRecord>)_templates.ItemsSource).FirstOrDefault(t => t.Name == _templateName.Text.Trim()); }
@@ -713,7 +730,7 @@ public sealed class PersonalizedWindow : Window
         if (!RequireAllFields("서식을 저장할")) return;
         var existing = _store.GetTemplates().FirstOrDefault(t => t.Name == name);
         if (existing is not null && existing.Body != _template.Text &&
-            Dialogs.Show(this, $"‘{name}’ 서식이 이미 있습니다. 내용을 지금 서식으로 바꿀까요?", "서식 덮어쓰기", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+            Dialogs.Show(Host, $"‘{name}’ 서식이 이미 있습니다. 내용을 지금 서식으로 바꿀까요?", "서식 덮어쓰기", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
         _store.SaveTemplate(name, _template.Text);
         ReloadTemplates(name);
         _status.Text = existing is null ? $"‘{name}’ 서식을 저장했습니다." : $"‘{name}’ 서식의 내용을 바꿔 저장했습니다.";
@@ -722,7 +739,7 @@ public sealed class PersonalizedWindow : Window
     private void DeleteSelectedTemplate()
     {
         if (_templates.SelectedItem is not TemplateRecord chosen) { _status.Text = "삭제할 저장 서식을 목록에서 먼저 고르세요."; return; }
-        if (Dialogs.Show(this, $"‘{chosen.Name}’ 저장 서식을 삭제할까요?\n진행 중인 작업의 서식 내용은 그대로 남습니다.", "서식 삭제", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+        if (Dialogs.Show(Host, $"‘{chosen.Name}’ 저장 서식을 삭제할까요?\n진행 중인 작업의 서식 내용은 그대로 남습니다.", "서식 삭제", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
         _store.DeleteTemplate(chosen.Id);
         ReloadTemplates();
         _status.Text = $"‘{chosen.Name}’ 서식을 삭제했습니다.";
@@ -811,7 +828,7 @@ public sealed class PersonalizedWindow : Window
         var inTemplate = NotePersonalization.ExtractVariables(_template.Text).Contains(header);
         var prompt = $"항목 ‘{header}’ 열을 지울까요?\n\n사람별로 입력한 이 열의 값이 모두 삭제됩니다." +
             (inTemplate ? $"\n서식 내용의 {{{header}}}도 함께 지워집니다." : "");
-        if (Dialogs.Show(this, prompt, "항목 삭제", MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
+        if (Dialogs.Show(Host, prompt, "항목 삭제", MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
         if (_work.RemoveHeader(header) is { } error) { _status.Text = error; return; }
         _template.Text = NotePersonalization.RemoveVariable(_template.Text, header);
         RebuildColumns(); UpdateFieldChips(); RefreshGrid();
@@ -832,7 +849,7 @@ public sealed class PersonalizedWindow : Window
         stack.Children.Add(input); stack.Children.Add(error); stack.Children.Add(buttons);
         var dialog = new Window
         {
-            Title = title, Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner, Width = 420,
+            Title = title, Owner = Host, WindowStartupLocation = WindowStartupLocation.CenterOwner, Width = 420,
             SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false,
             Style = Res<Style>("AppWindow"), Content = stack,
         };
@@ -863,7 +880,7 @@ public sealed class PersonalizedWindow : Window
     private void ExportCsv()
     {
         var dialog = new Microsoft.Win32.SaveFileDialog { Title = "개인별 입력 양식 저장", Filter = "CSV 파일 (*.csv)|*.csv", FileName = "개인별_쪽지_입력.csv" };
-        if (dialog.ShowDialog(this) != true) return;
+        if (dialog.ShowDialog(Host) != true) return;
         try
         {
             var headers = _work.Headers.Concat(NotePersonalization.ExtractVariables(_template.Text)).Distinct().ToList();
@@ -876,7 +893,7 @@ public sealed class PersonalizedWindow : Window
     private void ImportFile()
     {
         var dialog = new Microsoft.Win32.OpenFileDialog { Title = "개인별 데이터 파일 가져오기", Filter = "표 파일 (*.csv;*.tsv;*.xlsx)|*.csv;*.tsv;*.xlsx" };
-        if (dialog.ShowDialog(this) != true) return;
+        if (dialog.ShowDialog(Host) != true) return;
         Commit(); FlushPreview();
         var imported = PersonalizedImport.ReadFile(dialog.FileName);
         var errors = imported.Ready ? PersonalizedImport.Match(_work, imported) : imported.Errors;
@@ -898,7 +915,7 @@ public sealed class PersonalizedWindow : Window
         if (_template.Text.Trim().Length == 0) { _status.Text = "①에 서식 내용을 먼저 입력하세요."; _template.Focus(); return; }
         var added = AddMissingHeaders();
         if (!RequireAllFields("본문을 생성할")) return;
-        if (_work.Items.Any(i => i.Body.Length > 0 && !i.Attempted) && Dialogs.Show(this, "미발송 대상의 개별 수정 본문을 현재 서식으로 다시 만들까요?", "본문 다시 생성", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+        if (_work.Items.Any(i => i.Body.Length > 0 && !i.Attempted) && Dialogs.Show(Host, "미발송 대상의 개별 수정 본문을 현재 서식으로 다시 만들까요?", "본문 다시 생성", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
         var errors = new List<string>();
         foreach (var item in _work.Items.Where(i => !i.Attempted))
         {
@@ -1008,7 +1025,7 @@ public sealed class PersonalizedWindow : Window
             (skipped > 0 ? $"※ 본문이 준비되지 않은 미발송 {skipped}명은 이번에 보내지 않습니다.\n\n" : "") +
             "온톡에서 빈 '새 쪽지' 창을 자동으로 확보(없으면 새로 열기)하여 한 사람씩 수신자 대조·본문 반영·검증·전송을 수행합니다.\n" +
             "보낸 뒤에는 되돌릴 수 없습니다. 자동 연속 발송을 시작할까요?";
-        if (Dialogs.Show(this, prompt, "개인별 쪽지 자동 연속 발송 확인", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+        if (Dialogs.Show(Host, prompt, "개인별 쪽지 자동 연속 발송 확인", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
         {
             _status.Text = "자동 연속 발송을 취소했습니다.";
             return;
@@ -1049,7 +1066,7 @@ public sealed class PersonalizedWindow : Window
             AttachmentLine() +
             $"본문 ({NoteBytes.Count(item.Body)} Bytes):\n{preview}\n\n" +
             "보낼까요?";
-        if (Dialogs.Show(this, prompt, "개인별 쪽지 자동 발송 확인", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+        if (Dialogs.Show(Host, prompt, "개인별 쪽지 자동 발송 확인", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
         {
             _status.Text = "발송을 취소했습니다.";
             return;
@@ -1480,7 +1497,7 @@ public sealed class PersonalizedWindow : Window
         var sample = string.Join("\n", targets.Take(5).Select(w => $"  · {w.Headline} ({w.Detail})")) + (targets.Count > 5 ? $"\n  외 {targets.Count - 5}개" : "");
         var prompt = $"‘임시 저장’ 표시도 발송 기록도 없는 저장 작업 {targets.Count}개를 삭제할까요?\n\n{sample}\n\n" +
             "이전 버전이 창을 닫을 때 자동 저장한 작업 등입니다. 예전에 ‘작업 저장’으로 직접 저장한 작업이 섞여 있을 수 있으니 목록을 확인하세요. 삭제하면 되돌릴 수 없습니다.";
-        if (Dialogs.Show(this, prompt, "표시 없는 저장 작업 정리", MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
+        if (Dialogs.Show(Host, prompt, "표시 없는 저장 작업 정리", MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
         foreach (var work in targets) _store.DeletePersonalizedWork(work.Id);
         ReloadSaved();
         _status.Text = $"표시 없는 저장 작업 {targets.Count}개를 삭제했습니다.";
@@ -1506,7 +1523,7 @@ public sealed class PersonalizedWindow : Window
     private bool ConfirmLeave(string title, string action)
     {
         if (_batchCts is not null || !IsDirty()) return true;
-        var answer = Dialogs.Show(this, $"임시 저장하지 않은 변경이 있습니다.\n\n‘예’: 임시 저장하고 {action}\n‘아니오’: 저장하지 않고 {action}\n‘취소’: 계속 작업", title,
+        var answer = Dialogs.Show(Host, $"임시 저장하지 않은 변경이 있습니다.\n\n‘예’: 임시 저장하고 {action}\n‘아니오’: 저장하지 않고 {action}\n‘취소’: 계속 작업", title,
             MessageBoxButton.YesNoCancel, MessageBoxImage.Question, MessageBoxResult.Yes);
         if (answer == MessageBoxResult.Cancel) return false;
         if (answer == MessageBoxResult.Yes) Save(draft: true);
@@ -1521,7 +1538,7 @@ public sealed class PersonalizedWindow : Window
         _grid.SelectedItem = next;
         _grid.ScrollIntoView(next);
         _status.Text = $"다음 대상: {next.Name} · {next.Organization}. ‘선택한 한 사람만 발송’ 또는 ‘준비된 대상 자동 연속 발송’을 누르세요.";
-        Show(); Activate();
+        ActivateHost();
     }
 
     /// <summary>처리 상태 글을 색으로 구분한다: 완료 초록, 준비 파랑, 미준비 회색, 작성 중·시도 주황, 그 밖의 보류·오류 빨강.</summary>
@@ -1542,7 +1559,7 @@ public sealed class PersonalizedWindow : Window
     }
 }
 
-internal static class PersonalizedWindowExtensions
+internal static class PersonalizedPaneExtensions
 {
     public static void AutomationName(this DependencyObject element, string name) =>
         System.Windows.Automation.AutomationProperties.SetName(element, name);

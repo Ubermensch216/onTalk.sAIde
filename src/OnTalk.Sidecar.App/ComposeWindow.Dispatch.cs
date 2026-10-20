@@ -293,7 +293,7 @@ public partial class ComposeWindow
                 _picked.Clear();
                 Result($"전송 단추를 눌렀고 온톡 작성 창이 닫혔습니다({kind}). 상대에게 도착했는지는 여기서 확인하지 못하니 " +
                        "온톡 보낸 쪽지함에서 확인하세요. 보낸 초안은 비웠습니다.", ok: true);
-                if (_activeItem is not null) _personalizedWindow?.SelectNextPending();
+                if (_activeItem is not null) _personalizedPane?.SelectNextPending();
                 break;
             case SendStatus.StillOpen:
                 _store.FinishDispatch(id, DispatchStatus.StillOpen, outcome.Detail);

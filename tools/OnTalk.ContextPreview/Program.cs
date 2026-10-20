@@ -116,8 +116,8 @@ internal static class Program
                 statusText.Text = origStatus;
             }
         }
-        ContactPreparation? prepared = null; var personalizeRequested = false;
-        using var contacts = new PeoplePane((p, personalize) => { prepared = p; personalizeRequested = personalize; });
+        ContactPreparation? prepared = null;
+        using var contacts = new PeoplePane(p => prepared = p);
         var organization = peopleCases[2].Item2;
         var click = new RoutedEventArgs(ButtonBase.ClickEvent);
         contacts.Refresh(organization);
@@ -139,12 +139,10 @@ internal static class Program
         var rows = (StackPanel)Get(contacts,"_rows");
         ((Button)((DockPanel)rows.Children[0]).Children[0]).RaiseEvent(click);
         if (contacts.Chosen.Single().Key != "B") throw new InvalidOperationException("개별 제외가 반영되지 않았습니다.");
-        ((Button)Get(contacts,"_same")).RaiseEvent(click);
-        if (prepared?.People.Count != 1 || personalizeRequested) throw new InvalidOperationException("같은 쪽지 준비가 누락됐습니다.");
-        ((Button)Get(contacts,"_personal")).RaiseEvent(click);
-        if (!personalizeRequested) throw new InvalidOperationException("개인별 쪽지 준비가 누락됐습니다.");
+        ((Button)Get(contacts,"_send")).RaiseEvent(click);
+        if (prepared?.People.Count != 1 || prepared.People[0].Key != "B") throw new InvalidOperationException("쪽지 준비에 선택 직원이 넘어오지 않았습니다.");
         contacts.Refresh(organization with { SelectedKeys=[] });
-        if (contacts.Chosen.Count != 0 || ((Button)Get(contacts,"_same")).IsEnabled) throw new InvalidOperationException("선택이 없는데 쪽지를 보낼 수 있습니다.");
+        if (contacts.Chosen.Count != 0 || ((Button)Get(contacts,"_send")).IsEnabled) throw new InvalidOperationException("선택이 없는데 쪽지를 보낼 수 있습니다.");
         var candidate = (CheckBox)((StackPanel)Get(contacts,"_candidates")).Children[0]; candidate.IsChecked = true; candidate.RaiseEvent(click);
         if (contacts.Chosen.Single().Key != "A" || !contacts.SelectionNotice.Contains("1명")) throw new InvalidOperationException("온톡 선택이 없을 때 직접 고른 직원이 반영되지 않았습니다.");
         using var preparationWriter = new OllamaWriter();
@@ -166,7 +164,20 @@ internal static class Program
         personalItem.DispatchId = 1;
         if (Guard(personalState)) throw new InvalidOperationException("개인 쪽지 재발송 보호 실패");
         preparedHelper.Close();
-        var groupNote = new GroupNoteWindow(store, preparationWriter, new ContactPreparation([personA, personB], "온톡 조직도 선택", DateTimeOffset.Now),
+        // 쪽지 창(탭): 조직도에서 고른 직원이 ‘쪽지’의 받는 사람과 ‘개인별 쪽지’의 대상자에 똑같이 들어가야 한다.
+        var hostPrep = new ContactPreparation([personA, personB], "온톡 조직도 선택", DateTimeOffset.Now);
+        var host = new NoteHostWindow(store, preparationWriter, hostPrep, null, NoteTab.Note, new PreviewPersonalizedAutomation([personA, personB]));
+        var hostKeys = ((List<ContactPerson>)Get(host.Note!, "_people")).Select(p => p.SelectionKey).ToList();
+        var hostItems = ((PersonalizedWork)Get(host.Personalized!, "_work")).Items.Select(i => i.Person.SelectionKey).ToList();
+        if (hostKeys.Count != 2 || !hostKeys.SequenceEqual(hostItems) || hostKeys[0] != personA.SelectionKey)
+            throw new InvalidOperationException("쪽지 창의 두 탭에 조직도 선택 직원이 같게 들어가지 않았습니다.");
+        var hostTabs = (TabControl)host.Content;
+        if (hostTabs.Items.Count != 2 || ((TabItem)hostTabs.Items[0]).Header as string != "쪽지" || ((TabItem)hostTabs.Items[1]).Header as string != "개인별 쪽지")
+            throw new InvalidOperationException("쪽지 창 탭 이름이 맞지 않습니다.");
+        Render(hostTabs, Path.Combine(output, "note-host-note.png"), 900, 900);
+        hostTabs.SelectedIndex = 1;
+        Render(hostTabs, Path.Combine(output, "note-host-personalized.png"), 900, 900);
+        var groupNote = new GroupNotePane(store, preparationWriter, new ContactPreparation([personA, personB], "온톡 조직도 선택", DateTimeOffset.Now),
             new PreviewPersonalizedAutomation([personA, personB]));
         var groupSend = (Button)Get(groupNote, "_sendButton");
         ((TextBox)Get(groupNote, "_editor")).Text = "";
@@ -180,8 +191,7 @@ internal static class Program
         ((TextBox)Get(groupNote, "_aiProposal")).Text = "안녕하세요.\n10월 정기 점검 일정을 안내드립니다.\n\n일시: 10월 22일(수) 14:00\n장소: 3층 회의실\n\n참석 가능 여부를 회신해 주시면 감사하겠습니다.";
         Invoke(groupNote, "ShowAi");
         Render((FrameworkElement)groupNote.Content, Path.Combine(output, "group-note-ai.png"), 1000, 860);
-        groupNote.Close();
-        var personal = new PersonalizedWindow(
+        var personal = new PersonalizedPane(
             store,
             new OllamaWriter(),
             [personA, personB],
@@ -221,7 +231,6 @@ internal static class Program
         foreach (var w in new[] { tagged, work, partial })
             tagList.Children.Add(new ComboBoxItem { Content = w, ContentTemplate = ((ComboBox)Get(personal, "_saved")).ItemTemplate });
         Render(tagList, Path.Combine(output, "personalized-saved-tags.png"), 520, 200);
-        personal.Close();
         using var candidateEmbedder = new OllamaEmbedder();
         var candidateSearch = new SearchWindow(store, candidateEmbedder);
         var candidateNote = store.GetNote(seeded.NoteId)!;

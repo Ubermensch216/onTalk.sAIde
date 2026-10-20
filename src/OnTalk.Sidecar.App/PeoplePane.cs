@@ -6,12 +6,12 @@ using OnTalk.Sidecar.Core;
 namespace OnTalk.Sidecar.App;
 
 /// <summary>
-/// 온톡 조직도에서 사용자가 선택해 둔 직원을 보여 주고 같은 쪽지 또는 개인별 쪽지를 준비한다.
+/// 온톡 조직도에서 사용자가 선택해 둔 직원을 보여 주고, 쪽지 창(쪽지·개인별 쪽지 탭)에 그대로 넘긴다.
 /// 온톡이 선택 상태를 알려 주지 않거나 추가 대상이 필요한 경우 직접 추가할 수 있다.
 /// </summary>
 public sealed class PeoplePane : UserControl, IDisposable
 {
-    private readonly Action<ContactPreparation, bool> _open;
+    private readonly Action<ContactPreparation> _open;
     private readonly TextBlock _selection = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _emptyNotice = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 4) };
     private readonly StackPanel _rows = new();
@@ -19,8 +19,7 @@ public sealed class PeoplePane : UserControl, IDisposable
     private readonly Button _addButton = new();
     private readonly Border _addSection = new();
     private readonly TextBox _searchBox = new();
-    private readonly Button _same = new() { Content = "선택 직원에게 쪽지 보내기", Margin = new Thickness(0, 8, 0, 0) };
-    private readonly Button _personal = new() { Content = "선택 직원에게 개인별 쪽지 보내기", Margin = new Thickness(0, 6, 0, 0) };
+    private readonly Button _send = new() { Content = "쪽지", Margin = new Thickness(0, 8, 0, 0) };
     private readonly HashSet<string> _excluded = [];
     private readonly Dictionary<string, ContactPerson> _manual = [];
     private PeopleSnapshot _snapshot = new(MainMenu.Organization, [], [], [], DateTimeOffset.Now);
@@ -40,7 +39,7 @@ public sealed class PeoplePane : UserControl, IDisposable
         return _presenceAllowed.Contains(NormalizeStatus(person.Status));
     }
 
-    public PeoplePane(Action<ContactPreparation, bool> open)
+    public PeoplePane(Action<ContactPreparation> open)
     {
         _open = open;
         var body = new StackPanel { Margin = new Thickness(12) };
@@ -162,10 +161,8 @@ public sealed class PeoplePane : UserControl, IDisposable
         body.Children.Add(_addSection);
 
         // 3. 쪽지 발송 버튼
-        _same.Click += (_, _) => Open(false);
-        _personal.Click += (_, _) => Open(true);
-        body.Children.Add(_same);
-        body.Children.Add(_personal);
+        _send.Click += (_, _) => Open();
+        body.Children.Add(_send);
 
         Content = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         Update();
@@ -177,12 +174,12 @@ public sealed class PeoplePane : UserControl, IDisposable
     public IReadOnlyList<ContactPerson> Chosen => _selected.Where(s => !_excluded.Contains(s.Person.SelectionKey) && MatchesPresence(s.Person)).Select(s => s.Person).ToList();
     public string SelectionNotice => _selection.Text;
 
-    private void Open(bool personalized)
+    private void Open()
     {
         var chosen = Chosen;
         if (_disposed || !_active || chosen.Count == 0) return;
         _open(new ContactPreparation(chosen, "온톡 조직도 선택 · " + _snapshot.Coverage,
-            chosen.Select(p => p.DirectoryObservedAt ?? _snapshot.ObservedAt).Min()), personalized);
+            chosen.Select(p => p.DirectoryObservedAt ?? _snapshot.ObservedAt).Min()));
     }
 
     public void Refresh(PeopleSnapshot snapshot)
@@ -245,7 +242,7 @@ public sealed class PeoplePane : UserControl, IDisposable
             ? "선택된 직원을 확인하지 못했습니다."
             : $"선택한 직원 {_selected.Count}명 · 쪽지 대상 {chosen.Count}명";
         _emptyNotice.Visibility = _selected.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        _same.IsEnabled = _personal.IsEnabled = chosen.Count > 0;
+        _send.IsEnabled = chosen.Count > 0;
 
         var candidatesSignature = string.Join("|", _snapshot.People.Select(p => p.SelectionKey));
         if (candidatesSignature != _candidatesSignature)

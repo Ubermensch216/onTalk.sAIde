@@ -8,6 +8,7 @@ namespace OnTalk.Sidecar.App;
 public partial class PanelWindow
 {
     private HomePane? _homePane;
+    private NotesPane? _notesPane;
     private PeoplePane? _peoplePane;
     private string? _peoplePaneKey;
     private ChatPane? _chatPane;
@@ -50,15 +51,12 @@ public partial class PanelWindow
         }
         var guide = SidecarPolicy.Describe(context);
         SetStoreButtons(context.Surface != OnTalkSurface.Login);
-        ContextHeader.Visibility = Visibility.Visible;
-        ContextTitle.Text = guide.Title;
         WindowSubtitle.Text = guide.Title;
         ComposeButton.ToolTip = "새 쪽지";
-        ContextHint.Text = current.Context.Menu == MainMenu.Unknown && context.Menu != MainMenu.Unknown
-            ? "수동으로 지정한 메뉴 · 온톡 선택 대상은 변경하지 않습니다."
-            : "현재 부착된 온톡 창의 작업";
-        ManualMenuPanel.Visibility = current.Context is { Surface: OnTalkSurface.Main, Menu: MainMenu.Unknown }
-            ? Visibility.Visible : Visibility.Collapsed;
+        // 머리 영역에는 메뉴를 읽지 못했을 때 직접 고르는 선택기만 남는다.
+        var pickMenu = current.Context is { Surface: OnTalkSurface.Main, Menu: MainMenu.Unknown };
+        ManualMenuPanel.Visibility = pickMenu ? Visibility.Visible : Visibility.Collapsed;
+        ContextHeader.Visibility = pickMenu ? Visibility.Visible : Visibility.Collapsed;
         MenuPicker.IsEnabled = current.Context.Menu == MainMenu.Unknown;
 
         if (context.Surface == OnTalkSurface.NoteRead)
@@ -68,8 +66,6 @@ public partial class PanelWindow
             else
             {
                 ShowEmpty("현재 쪽지의 내용을 읽지 못했습니다. 온톡 화면 구성을 확인하세요.");
-                ContextHeader.Visibility = Visibility.Visible;
-                ContextTitle.Text = guide.Title;
             }
             return;
         }
@@ -127,7 +123,6 @@ public partial class PanelWindow
             EmptyState.Visibility = NoteView.Visibility = ComposeHost.Visibility = ChatHost.Visibility = ContextView.Visibility = Visibility.Collapsed;
             PeopleHost.Visibility = Visibility.Visible;
             ContextHeader.Visibility = Visibility.Collapsed;
-            ContextHint.Text = "그룹별 쪽지 발송 이력과 대화 요약";
             return;
         }
         if (context.Surface == OnTalkSurface.Main && context.Menu == MainMenu.Organization)
@@ -135,13 +130,22 @@ public partial class PanelWindow
             if (_peoplePane is null || _peoplePaneKey != key)
             {
                 _peoplePane?.Dispose();
-                _peoplePane = new PeoplePane((preparation, personalize) => OpenCompose(null, preparation: preparation, personalize: personalize));
+                _peoplePane = new PeoplePane(preparation => OpenCompose(null, preparation: preparation));
                 _peoplePaneKey = key;
             }
             _peoplePane.Refresh(current.People ?? new PeopleSnapshot(context.Menu, [], [], [], DateTimeOffset.Now));
             _peoplePane.SetActive(true);
             PeopleHost.Content = _peoplePane;
             EmptyState.Visibility = NoteView.Visibility = ComposeHost.Visibility = ContextView.Visibility = Visibility.Collapsed;
+            PeopleHost.Visibility = Visibility.Visible;
+            return;
+        }
+        if (context.Surface == OnTalkSurface.Main && context.Menu == MainMenu.Notes)
+        {
+            _notesPane ??= new NotesPane(_store, () => OpenCompose(null));
+            _notesPane.SetActive(true);
+            PeopleHost.Content = _notesPane;
+            EmptyState.Visibility = NoteView.Visibility = ComposeHost.Visibility = ChatHost.Visibility = ContextView.Visibility = Visibility.Collapsed;
             PeopleHost.Visibility = Visibility.Visible;
             return;
         }
@@ -152,9 +156,7 @@ public partial class PanelWindow
         ContextPurpose.Text = guide.Purpose;
         ContextTools.Text = guide.Tools;
         ContextScope.Text = guide.Scope;
-        var canPrepare = context.Surface == OnTalkSurface.Main && context.Menu == MainMenu.Notes;
-        ContextPrimary.Visibility = canPrepare ? Visibility.Visible : Visibility.Collapsed;
-        ContextPrimary.Content = "새 쪽지";
+        ContextPrimary.Visibility = Visibility.Collapsed;
         ContextSearch.Visibility = context.Surface == OnTalkSurface.Main ? Visibility.Visible : Visibility.Collapsed;
     }
 

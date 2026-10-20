@@ -61,8 +61,7 @@ public partial class PanelWindow : Window
     private long? _analyzingNoteId;
     private TasksWindow? _tasksWindow;
     private SearchWindow? _searchWindow;
-    private PersonalizedWindow? _personalizedWindow;
-    private GroupNoteWindow? _groupNoteWindow;
+    private NoteHostWindow? _noteWindow;
     private ManageWindow? _manageWindow;
     private string? _onTalkVersion;
     private bool _embedding;
@@ -131,6 +130,7 @@ public partial class PanelWindow : Window
             _chatPane?.Dispose();
             _peoplePane?.Dispose();
             _homePane?.Dispose();
+            _notesPane?.Dispose();
             _closing.Cancel();
             _watcher.Dispose();
             _analyzer.Dispose();
@@ -268,15 +268,14 @@ public partial class PanelWindow : Window
         _analysisCancel?.Cancel();
         _tasksWindow?.Close();
         _searchWindow?.Close();
-        _personalizedWindow?.Close();
-        _personalizedWindow = null;
-        _groupNoteWindow?.Close();
-        _groupNoteWindow = null;
+        _noteWindow?.Close();
+        _noteWindow = null;
         foreach (var pane in _composePanes.Values) pane.Dispose();
         _composePanes.Clear();
         _activePane = null;
         _peoplePane?.Dispose(); _peoplePane = null;
         _homePane?.Dispose(); _homePane = null;
+        _notesPane?.Dispose(); _notesPane = null;
         _peoplePaneKey = null;
         PeopleHost.Content = null;
         _chatPane?.Dispose(); _chatPane = null; _chatPaneKey = null; _conversationsPane = null;
@@ -431,6 +430,7 @@ public partial class PanelWindow : Window
         _activePane?.SetActive(false);
         _peoplePane?.SetActive(false);
         _homePane?.SetActive(false);
+        _notesPane?.SetActive(false);
         ComposeHost.Visibility = Visibility.Collapsed;
         PeopleHost.Visibility = Visibility.Collapsed;
         _chatPane?.SetActive(false);
@@ -452,12 +452,6 @@ public partial class PanelWindow : Window
     {
         EmptyState.Visibility = Visibility.Collapsed;
         NoteView.Visibility = Visibility.Visible;
-        CaptureText.Text = saved switch
-        {
-            null => "내용 확인 중",
-            { IsNew: true } => "새로 보관했습니다",
-            _ => $"보관한 쪽지 · 처음 본 시각 {saved.FirstSeenAt.ToLocalTime():yyyy-MM-dd HH:mm}",
-        };
         if (_shownKey != note.Key)
         {
             _analysisCancel?.Cancel();
@@ -470,15 +464,6 @@ public partial class PanelWindow : Window
             _shownKey = note.Key;
             _shownNote = note;
             _shownNoteId = null;
-            SenderText.Text = note.SenderName;
-            SenderInitial.Text = note.SenderName.Trim() is { Length: > 0 } name ? name[..1] : "?";
-            SenderDetailText.Text = note.SenderDetail;
-            TimeText.Text = note.SentAt switch
-            {
-                null => $"{note.SentAtText} (시각 해석 실패)",
-                { YearInferred: true } t => $"{t.Value:yyyy-MM-dd HH:mm} (연도는 추정)",
-                { } t => $"{t.Value:yyyy-MM-dd HH:mm}",
-            } + (note.RecipientCount is { } count ? $" · 수신 {count}명" : "");
             BodyText.Text = note.Body;
             BodyText.ScrollToHome();
             AttachmentPanel.Visibility = note.AttachmentNames.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -749,37 +734,34 @@ public partial class PanelWindow : Window
 
     private void OnNewDraft(object sender, RoutedEventArgs e) => OpenCompose(null);
 
-    private void OpenCompose(StoredNote? source, ComposeTarget? target = null, ContactPreparation? preparation = null, bool personalize = false)
+    private void OpenCompose(StoredNote? source, ComposeTarget? target = null, ContactPreparation? preparation = null)
     {
         if (_store is null)
         {
             return;
         }
-        if (personalize && preparation is not null)
+        // 새 쪽지 · 답장 · 선택 직원/친구에게 쪽지는 모두 같은 쪽지 창(‘쪽지’ · ‘개인별 쪽지’ 탭)을 쓴다.
+        // 이미 열린 창이 있으면 먼저 닫아 새로 고른 직원이 두 탭에 그대로 들어가게 하고, 닫기를 취소하면(저장 안 한 개인별 작업 등) 그 창에서 계속한다.
+        if (_noteWindow is { } open)
         {
-            _personalizedWindow?.Close();
-            _personalizedWindow = new PersonalizedWindow(_store, _writer, preparation.People, "") { Owner = this };
-            _personalizedWindow.Closed += (s, _) =>
+            open.Close();
+            if (ReferenceEquals(open, _noteWindow))
             {
-                if (ReferenceEquals(s, _personalizedWindow))
-                {
-                    _personalizedWindow = null;
-                }
-            };
-            ShowWorkWindow(_personalizedWindow);
-            return;
+                open.Show();
+                open.Activate();
+                return;
+            }
         }
-        // 새 쪽지 · 답장 · 선택 직원/친구에게 쪽지 보내기 모두 동일한 쪽지 작업 창(GroupNoteWindow)을 사용한다.
-        _groupNoteWindow?.Close();
-        _groupNoteWindow = new GroupNoteWindow(_store, _writer, preparation, source: source) { Owner = this };
-        _groupNoteWindow.Closed += (s, _) =>
+        var window = new NoteHostWindow(_store, _writer, preparation, source) { Owner = this };
+        _noteWindow = window;
+        window.Closed += (_, _) =>
         {
-            if (ReferenceEquals(s, _groupNoteWindow))
+            if (ReferenceEquals(window, _noteWindow))
             {
-                _groupNoteWindow = null;
+                _noteWindow = null;
             }
         };
-        ShowWorkWindow(_groupNoteWindow);
+        ShowWorkWindow(window);
     }
 
     private void OnOpenSearch(object sender, RoutedEventArgs e)

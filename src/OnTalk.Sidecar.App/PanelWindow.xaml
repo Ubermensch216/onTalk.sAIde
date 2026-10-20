@@ -101,9 +101,9 @@
             </DockPanel>
         </Border>
 
-        <!-- 연결 상태 -->
+        <!-- 연결 상태: 화면 공간을 위해 숨기고 값만 갱신한다 -->
         <Border DockPanel.Dock="Top" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}"
-                BorderThickness="0,0,0,1" Padding="12,8">
+                BorderThickness="0,0,0,1" Padding="12,8" Visibility="Collapsed">
             <Border x:Name="StatusChip" Background="{StaticResource PageBg}" CornerRadius="12" Padding="10,4"
                     HorizontalAlignment="Left">
                 <StackPanel Orientation="Horizontal">
@@ -135,9 +135,7 @@
         <Border x:Name="ContextHeader" DockPanel.Dock="Top" Padding="14,10" Background="{StaticResource Surface}"
                 BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Visibility="Collapsed">
             <StackPanel>
-                <TextBlock x:Name="ContextTitle" FontWeight="Bold" TextWrapping="Wrap" />
-                <TextBlock x:Name="ContextHint" Style="{StaticResource Small}" Margin="0,4,0,0" />
-                <StackPanel x:Name="ManualMenuPanel" Visibility="Collapsed" Margin="0,8,0,0">
+                <StackPanel x:Name="ManualMenuPanel" Visibility="Collapsed">
                     <TextBlock Text="메뉴를 읽지 못하면 직접 지정" Style="{StaticResource Caption}" />
                     <ComboBox x:Name="MenuPicker" SelectedIndex="0" SelectionChanged="OnManualMenuChanged">
                         <ComboBoxItem Content="자동 감지" Tag="Unknown" />
@@ -198,24 +196,7 @@
                 <Border DockPanel.Dock="Top" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}"
                         BorderThickness="0,0,0,1" Padding="14,14,14,14" Margin="0,0,0,12">
                     <StackPanel>
-                        <DockPanel>
-                            <Border DockPanel.Dock="Left" Width="40" Height="40" CornerRadius="20"
-                                    Background="{StaticResource AccentSoft}" Margin="0,0,12,0" VerticalAlignment="Top">
-                                <TextBlock x:Name="SenderInitial" FontWeight="Bold" FontSize="16"
-                                           Foreground="{StaticResource AccentText}" HorizontalAlignment="Center"
-                                           VerticalAlignment="Center" />
-                            </Border>
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock x:Name="SenderText" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
-                                <TextBlock x:Name="SenderDetailText" Style="{StaticResource Small}" Margin="0,1,0,0" />
-                                <TextBlock x:Name="TimeText" Style="{StaticResource Small}" Margin="0,1,0,0" />
-                            </StackPanel>
-                        </DockPanel>
-                        <Border Style="{StaticResource Chip}" Margin="0,10,0,0">
-                            <TextBlock x:Name="CaptureText" Style="{StaticResource Caption}" TextWrapping="NoWrap"
-                                       Foreground="{StaticResource AccentText}" />
-                        </Border>
-                        <Button Content="답장 초안 쓰기" Style="{StaticResource PrimaryButton}" Margin="0,12,0,0"
+                        <Button Content="답장 초안 쓰기" Style="{StaticResource PrimaryButton}"
                                 MinHeight="36" Click="OnReplyDraft" />
                     </StackPanel>
                 </Border>

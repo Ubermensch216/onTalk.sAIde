@@ -18,7 +18,7 @@ namespace OnTalk.Sidecar.App;
 /// 개인별 쪽지 창과 같이 작업 단위(① 받는 사람 → ② 본문 → ③ 발송 방식)를 카드로 나누고, 발송 단추는 항상 보이는 아래 줄에 둔다.
 /// 본문 오른쪽에는 AI 문장 다듬기 패널(6가지 프리셋 단추)을 두어, 블럭 지정한 문장만 바꾸거나 전체 본문을 다듬을 수 있다.
 /// </summary>
-public sealed class GroupNoteWindow : Window
+public sealed class GroupNotePane : WorkPane
 {
     private const string GroupDraftSlot = "organization:group-note";
 
@@ -87,7 +87,7 @@ public sealed class GroupNoteWindow : Window
     private bool _attempted;
     private bool _closed;
 
-    public GroupNoteWindow(
+    public GroupNotePane(
         ProfileStore store,
         OllamaWriter writer,
         ContactPreparation? preparation = null,
@@ -109,9 +109,7 @@ public sealed class GroupNoteWindow : Window
                 ? "답장 쪽지"
                 : "새 쪽지";
 
-        Title = pageTitle; Width = 840; Height = 860; MinWidth = 680; MinHeight = 560;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Style = Res<Style>("AppWindow");
+        Title = pageTitle;
 
         _stopButton = Btn("중단", (_, _) => { _runCts?.Cancel(); _stopButton!.IsEnabled = false; Status("현재 단계를 마치고 멈춥니다...", "Muted"); }, track: false, style: "DangerButton");
         _stopButton.Visibility = Visibility.Collapsed;
@@ -140,7 +138,9 @@ public sealed class GroupNoteWindow : Window
 
         StyleControls();
         var page = new StackPanel { Margin = new Thickness(20, 16, 20, 12) };
-        page.Children.Add(new TextBlock { Text = pageTitle, Style = Res<Style>("PageTitle"), Margin = new Thickness(2, 0, 0, 12) });
+        // 탭 이름이 이미 ‘쪽지’이므로, 일반 새 쪽지가 아닌 경우(답장·선택 직원)에만 어떤 작업인지 제목으로 밝힌다.
+        if (preparation is { People.Count: > 0 } || source is not null)
+            page.Children.Add(new TextBlock { Text = pageTitle, Style = Res<Style>("PageTitle"), Margin = new Thickness(2, 0, 0, 12) });
         page.Children.Add(BuildRecipientSection());
         page.Children.Add(BuildBodySection());
         page.Children.Add(BuildAttachmentSection());
@@ -172,13 +172,21 @@ public sealed class GroupNoteWindow : Window
         UpdateDraftState();
         Loaded += (_, _) =>
         {
+            // 탭을 오갈 때마다 다시 불리므로, 받는 사람 자동 검색은 처음 한 번만 한다.
+            var first = !_initialized;
+            _initialized = true;
             _editor.Focus(); _editor.CaretIndex = _editor.Text.Length;
             // 답장은 보낸 사람을 받는 사람으로 자동 지정한다(온톡 사용자 검색에서 한 명으로 확정되면 바로 넣는다).
-            if (source is not null && _people.Count == 0 && _recipientSearch.Text.Length > 0)
+            if (first && source is not null && _people.Count == 0 && _recipientSearch.Text.Length > 0)
                 OnSearchRecipientAsync(this, new RoutedEventArgs());
         };
-        Closed += (_, _) => { _closed = true; _closing.Cancel(); _runCts?.Cancel(); };
     }
+
+    private bool _initialized;
+
+    internal override bool IsBusy => _runCts is not null;
+
+    internal override void HostClosed() { _closed = true; _closing.Cancel(); _runCts?.Cancel(); }
 
     private IReadOnlyList<ContactPerson> Chosen => _people.Where(p => !_excluded.Contains(p.SelectionKey)).ToList();
 
@@ -481,10 +489,7 @@ public sealed class GroupNoteWindow : Window
     private void BringBack()
     {
         if (_closed) return;
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
-        Activate();
-        Topmost = true;
-        Topmost = false;
+        BringHostBack();
         _recipientSearch.Focus();
     }
 
@@ -575,7 +580,7 @@ public sealed class GroupNoteWindow : Window
             Status("삭제할 수신 그룹을 먼저 고르세요.", "Warn");
             return;
         }
-        if (Dialogs.Show(this, $"‘{group.Name}’ 수신 그룹을 삭제할까요?", "그룹 삭제", MessageBoxButton.OKCancel) != MessageBoxResult.OK)
+        if (Dialogs.Show(Host, $"‘{group.Name}’ 수신 그룹을 삭제할까요?", "그룹 삭제", MessageBoxButton.OKCancel) != MessageBoxResult.OK)
             return;
         _store.DeleteGroup(group.Id);
         ReloadGroups();
@@ -723,7 +728,7 @@ public sealed class GroupNoteWindow : Window
     private void OnPickAttachments()
     {
         var dialog = new Microsoft.Win32.OpenFileDialog { Title = "첨부할 파일 선택", Multiselect = true, CheckFileExists = true };
-        if (dialog.ShowDialog(this) == true) AddAttachments(dialog.FileNames);
+        if (dialog.ShowDialog(Host) == true) AddAttachments(dialog.FileNames);
     }
 
     private void AddAttachments(IEnumerable<string> files)
@@ -909,7 +914,7 @@ public sealed class GroupNoteWindow : Window
     {
         if (_applyingTemplate || _templates.SelectedItem is not TemplateRecord chosen) return;
         if (_editor.Text.Trim().Length > 0 && _editor.Text != chosen.Body &&
-            Dialogs.Show(this, $"지금 본문을 ‘{chosen.Name}’ 서식으로 바꿀까요?", "서식 불러오기", MessageBoxButton.OKCancel) != MessageBoxResult.OK)
+            Dialogs.Show(Host, $"지금 본문을 ‘{chosen.Name}’ 서식으로 바꿀까요?", "서식 불러오기", MessageBoxButton.OKCancel) != MessageBoxResult.OK)
         {
             ReloadTemplates(_templateName.Text.Trim());
             return;
@@ -932,7 +937,7 @@ public sealed class GroupNoteWindow : Window
         if (_editor.Text.Trim().Length == 0) { Status("본문이 비어 있어 저장하지 않았습니다.", "Warn"); _editor.Focus(); return; }
         var existing = _store.GetTemplates().FirstOrDefault(t => t.Name == name);
         if (existing is not null && existing.Body != _editor.Text &&
-            Dialogs.Show(this, $"‘{name}’ 서식이 이미 있습니다. 지금 본문으로 바꿀까요?", "서식 덮어쓰기", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+            Dialogs.Show(Host, $"‘{name}’ 서식이 이미 있습니다. 지금 본문으로 바꿀까요?", "서식 덮어쓰기", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
         _store.SaveTemplate(name, _editor.Text);
         ReloadTemplates(name);
         Status(existing is null ? $"‘{name}’ 서식을 저장했습니다." : $"‘{name}’ 서식을 바꿔 저장했습니다.");
@@ -941,7 +946,7 @@ public sealed class GroupNoteWindow : Window
     private void DeleteSelectedTemplate()
     {
         if (_templates.SelectedItem is not TemplateRecord chosen) { Status("삭제할 서식을 먼저 고르세요.", "Warn"); return; }
-        if (Dialogs.Show(this, $"‘{chosen.Name}’ 서식을 삭제할까요?", "서식 삭제", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+        if (Dialogs.Show(Host, $"‘{chosen.Name}’ 서식을 삭제할까요?", "서식 삭제", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
         _store.DeleteTemplate(chosen.Id);
         ReloadTemplates();
         Status($"‘{chosen.Name}’ 서식을 삭제했습니다.");
@@ -1149,7 +1154,7 @@ public sealed class GroupNoteWindow : Window
             $"받는 사람:\n{sample}{more}\n\n" +
             $"본문 ({NoteBytes.Count(body):N0} Bytes):\n{preview}\n\n" +
             "보낸 뒤에는 되돌릴 수 없습니다. 보낼까요?";
-        return Dialogs.Show(this, prompt, $"{Title} 발송 확인", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
+        return Dialogs.Show(Host, prompt, $"{Title} 발송 확인", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
     }
 
     private void SetRunning(bool running)

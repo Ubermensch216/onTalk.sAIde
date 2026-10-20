@@ -7,7 +7,8 @@ namespace OnTalk.Sidecar.App;
 public partial class ComposeWindow
 {
     private IReadOnlyList<ContactPerson> _preparedPeople = [];
-    private PersonalizedWindow? _personalizedWindow;
+    private NoteHostWindow? _personalizedWindow;
+    private PersonalizedPane? _personalizedPane;
     private PersonalizedWork? _activeWork;
     private PersonalizedWorkItem? _activeItem;
     private Guid _personalizedSession;
@@ -15,8 +16,10 @@ public partial class ComposeWindow
     private void OnPersonalize(object sender, RoutedEventArgs e)
     {
         if (_personalizedWindow is not null) { _personalizedWindow.Show(); _personalizedWindow.Activate(); return; }
-        _personalizedWindow = new PersonalizedWindow(_store, _writer, _preparedPeople, Editor.Text, PreparePersonalizedAsync) { Owner = this };
-        _personalizedWindow.Closed += (_, _) => _personalizedWindow = null;
+        var pane = new PersonalizedPane(_store, _writer, _preparedPeople, Editor.Text, PreparePersonalizedAsync);
+        _personalizedPane = pane;
+        _personalizedWindow = new NoteHostWindow(pane) { Owner = this };
+        _personalizedWindow.Closed += (_, _) => { _personalizedWindow = null; _personalizedPane = null; };
         _personalizedWindow.Show();
     }
 
