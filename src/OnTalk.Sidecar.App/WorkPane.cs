@@ -14,7 +14,7 @@ public abstract class WorkPane : UserControl
     {
         // 창 스타일(AppWindow)이 주던 글꼴·글자색을 직접 지정한다. 아직 창에 붙기 전에도 같은 모양으로 만들어져야 한다.
         FontFamily = new FontFamily("Malgun Gothic");
-        FontSize = 12;
+        FontSize = 13;
         UseLayoutRounding = true;
         SetResourceReference(ForegroundProperty, "TextStrong");
         System.Windows.Media.TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);

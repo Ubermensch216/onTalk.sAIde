@@ -19,7 +19,7 @@ public enum NoteTab { Note, Personalized }
 internal static class Density
 {
     /// <summary>화면 전체 확대 배율의 상한. 작업 영역이 모자라면 <see cref="Fit"/>이 이보다 낮춘다.</summary>
-    public const double MaxScale = 1.2;
+    public const double MaxScale = 1.0;
 
     /// <summary>이보다 낮추지는 않는다. 그래도 모자라면 창이 작업 영역에 맞춰지고 세로로 스크롤된다.</summary>
     public const double MinScale = 1.0;
@@ -29,7 +29,7 @@ internal static class Density
     /// 스크롤 없이 한눈에 들어오는 값이다(두 사람을 받는 사람으로 넣은 경우를 잰 822에 여유를 더함).
     /// 어느 탭으로 열든 같은 크기로 연다.
     /// </summary>
-    public const double LayoutWidth = 504, LayoutHeight = 830, MinLayoutWidth = 400, MinLayoutHeight = 380;
+    public const double LayoutWidth = 580, LayoutHeight = 820, MinLayoutWidth = 400, MinLayoutHeight = 380;
 
     /// <summary>창 틀(제목 줄과 테두리)이 차지하는 크기. 화면에 거는 배율과 무관하다.</summary>
     public static (double Width, double Height) Frame =>
@@ -59,7 +59,7 @@ internal static class Density
         new("TabHeight", 24d), new("TabRadius", new CornerRadius(12)), new("TabBarRadius", new CornerRadius(15)),
         new("TabBarPadding", new Thickness(2)), new("TabBarMargin", new Thickness(8, 0, 8, 4)),
         new("CheckSize", 15d),
-        new("FontSmall", 11d), new("LineSmall", 15d), new("FontCaption", 10.5), new("LineCaption", 14d),
+        new("FontSmall", 12d), new("LineSmall", 16d), new("FontCaption", 11d), new("LineCaption", 15d),
         new("FontPageTitle", 15d),
     ];
 }

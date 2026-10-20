@@ -21,10 +21,10 @@ internal static class WorkUi
             {
                 Width = 18, Height = 18, CornerRadius = new CornerRadius(9), Background = Res<Brush>("Accent"),
                 Margin = new Thickness(0, 1, 7, 0), VerticalAlignment = VerticalAlignment.Top,
-                Child = new TextBlock { Text = step, Foreground = Brushes.White, FontWeight = FontWeights.Bold, FontSize = 10.5, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
+                Child = new TextBlock { Text = step, Foreground = Brushes.White, FontWeight = FontWeights.Bold, FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
             });
         var texts = new StackPanel();
-        texts.Children.Add(new TextBlock { Text = title, FontWeight = FontWeights.Bold, FontSize = 13 });
+        texts.Children.Add(new TextBlock { Text = title, FontWeight = FontWeights.Bold, FontSize = 14 });
         if (hint.Length > 0)
             texts.Children.Add(new TextBlock { Text = hint, TextWrapping = TextWrapping.Wrap, Style = Res<Style>("Small"), Margin = new Thickness(0, 1, 0, 0) });
         Grid.SetColumn(texts, 1); head.Children.Add(texts);
@@ -64,11 +64,11 @@ internal static class WorkUi
         var guide = new StackPanel { Width = width };
         guide.Children.Add(new TextBlock { Text = title, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 6) });
         foreach (var line in lines)
-            guide.Children.Add(new TextBlock { Text = "• " + line, TextWrapping = TextWrapping.Wrap, FontSize = 11.5, Margin = new Thickness(0, 0, 0, 3) });
+            guide.Children.Add(new TextBlock { Text = "• " + line, TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 0, 0, 3) });
         // 아이콘 글꼴(IconButton)을 그대로 두면 풍선 안 글자까지 물려받아 깨지므로, 단추와 풍선 모두 창의 글꼴을 직접 지정한다.
         var button = new Button
         {
-            Content = "?", Style = Res<Style>("IconButton"), FontFamily = res.FontFamily, FontSize = 13, FontWeight = FontWeights.Bold, Width = 20, Height = 20,
+            Content = "?", Style = Res<Style>("IconButton"), FontFamily = res.FontFamily, FontSize = 13, Width = 20, Height = 20,
             ToolTip = title, Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
         };
         button.AutomationName(title);

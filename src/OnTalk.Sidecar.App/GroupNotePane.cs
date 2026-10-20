@@ -48,7 +48,7 @@ public sealed class GroupNotePane : WorkPane
     private readonly TextBox _editor = new() { Height = 168, IsInactiveSelectionHighlightEnabled = true, VerticalAlignment = VerticalAlignment.Top };
     private readonly TextBlock _bytes = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _bodyWarn = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0), Visibility = Visibility.Collapsed };
-    private readonly TextBlock _aiScope = new() { TextWrapping = TextWrapping.Wrap, FontSize = 10.5, Margin = new Thickness(2, 5, 2, 0) };
+    private readonly TextBlock _aiScope = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(2, 5, 2, 0) };
     private readonly List<Button> _aiButtons = [];
     private readonly Button _undoButton;
     private bool _applyingTemplate;
@@ -131,16 +131,13 @@ public sealed class GroupNotePane : WorkPane
             IsEnabled = false,
             Padding = new Thickness(6, 1, 6, 1),
             MinHeight = 20,
-            FontSize = 10.5,
+            FontSize = 11,
             ToolTip = "직전 AI 문장 변환 전 상태로 되돌립니다.",
         };
         _undoButton.Click += (_, _) => UndoAi();
 
         StyleControls();
         var page = new StackPanel { Margin = new Thickness(12, 10, 12, 6) };
-        // 탭 이름이 이미 ‘쪽지’이므로, 일반 새 쪽지가 아닌 경우(답장·선택 직원)에만 어떤 작업인지 제목으로 밝힌다.
-        if (preparation is { People.Count: > 0 } || source is not null)
-            page.Children.Add(new TextBlock { Text = pageTitle, Style = Res<Style>("PageTitle"), Margin = new Thickness(2, 0, 0, 8) });
         page.Children.Add(BuildRecipientSection());
         page.Children.Add(BuildBodySection());
         page.Children.Add(BuildAttachmentSection());
@@ -275,7 +272,7 @@ public sealed class GroupNotePane : WorkPane
         searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(62) });
         searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var searchLabel = new TextBlock { Text = "사람 추가", FontWeight = FontWeights.SemiBold, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        var searchLabel = new TextBlock { Text = "사람 추가", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
         Grid.SetColumn(searchLabel, 0);
         _recipientSearch.Margin = new Thickness(0, 0, 6, 0);
         Grid.SetColumn(_recipientSearch, 1);
@@ -294,7 +291,7 @@ public sealed class GroupNotePane : WorkPane
         groupRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         groupRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         groupRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var groupLabel = new TextBlock { Text = "수신 그룹", FontWeight = FontWeights.SemiBold, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        var groupLabel = new TextBlock { Text = "수신 그룹", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
         Grid.SetColumn(groupLabel, 0);
         _groups.Margin = new Thickness(0, 0, 6, 0);
         Grid.SetColumn(_groups, 1);
@@ -338,7 +335,7 @@ public sealed class GroupNotePane : WorkPane
             {
                 Text = "아직 받는 사람이 없습니다. 아래에서 이름을 검색해 추가하거나 수신 그룹을 넣으세요.",
                 Foreground = Res<Brush>("Muted"),
-                FontSize = 11.5,
+                FontSize = 12,
                 Margin = new Thickness(0, 0, 0, 3),
             });
         }
@@ -358,10 +355,9 @@ public sealed class GroupNotePane : WorkPane
             var tag = isDuplicate ? (sameIdentity.Count > 1 ? $" · 중복{dupGroup + 1}" : " · 중복") : isNamesake ? " · 동명" : "";
             var label = new TextBlock
             {
-                Text = $"{person.Name}{titlePart}{tag}", VerticalAlignment = VerticalAlignment.Center, FontSize = 11.5,
+                Text = $"{person.Name}{titlePart}{tag}", VerticalAlignment = VerticalAlignment.Center, FontSize = 12,
                 TextDecorations = excluded ? TextDecorations.Strikethrough : null,
-                FontWeight = isDuplicate ? FontWeights.SemiBold : FontWeights.Normal,
-            };
+                            };
             if (isDuplicate) label.Foreground = Res<Brush>("Danger");
             else if (isNamesake) label.Foreground = Res<Brush>("Warn");
             row.Children.Add(label);
@@ -389,7 +385,7 @@ public sealed class GroupNotePane : WorkPane
             ? "이름·직급·소속이 같은 대상이 있습니다. 빨갛게 표시된 칩 중 하나만 남기세요."
             : sameName.Count > 0 ? "동명이인이 있습니다. 주황색으로 표시된 칩의 직급·소속을 확인하세요." : "";
         _identityWarn.Foreground = Res<Brush>(sameIdentity.Count > 0 ? "Danger" : "Warn");
-        _identityWarn.FontWeight = sameIdentity.Count > 0 ? FontWeights.SemiBold : FontWeights.Normal;
+        
         _identityWarn.Visibility = _identityWarn.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateButtons();
     }
@@ -500,7 +496,7 @@ public sealed class GroupNotePane : WorkPane
         _candidateList.Children.Add(new TextBlock
         {
             Text = $"‘{query}’ 검색 결과 {rows.Count}명 · 추가할 사람을 고르세요",
-            FontWeight = FontWeights.SemiBold,
+           
             FontSize = 11,
             Margin = new Thickness(0, 0, 0, 4),
         });
@@ -601,7 +597,7 @@ public sealed class GroupNotePane : WorkPane
             if (el is FrameworkElement fe) fe.Margin = margin ?? new Thickness(0, 0, 0, 5);
             grid.Children.Add(el);
         }
-        TextBlock Label(string text) => new() { Text = text, FontWeight = FontWeights.SemiBold, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center };
+        TextBlock Label(string text) => new() { Text = text, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
 
         Place(Label("저장된 서식"), 0, 0, margin: new Thickness(0, 0, 8, 5));
         Place(_templates, 0, 1, margin: new Thickness(0, 0, 6, 5));
@@ -638,7 +634,7 @@ public sealed class GroupNotePane : WorkPane
         header.Children.Add(new TextBlock
         {
             Text = "✦ AI 문장 다듬기",
-            FontWeight = FontWeights.SemiBold,
+           
             FontSize = 11,
             Foreground = Res<Brush>("AccentText"),
             VerticalAlignment = VerticalAlignment.Center,
@@ -862,13 +858,11 @@ public sealed class GroupNotePane : WorkPane
         {
             _aiScope.Text = $"선택 구간만 변환 ({len}자)";
             _aiScope.Foreground = Res<Brush>("AccentText");
-            _aiScope.FontWeight = FontWeights.SemiBold;
         }
         else
         {
             _aiScope.Text = "블럭 지정 시 그 구간만, 없으면 전체 변환";
             _aiScope.Foreground = Res<Brush>("Muted");
-            _aiScope.FontWeight = FontWeights.Normal;
         }
     }
 

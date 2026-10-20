@@ -41,7 +41,7 @@ public sealed class PersonalizedPane : WorkPane
     private readonly TextBlock _selectedInfo = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock _bodyInfo = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
     private readonly TextBox _preview = new() { Height = 150, IsInactiveSelectionHighlightEnabled = true };
-    private readonly TextBlock _aiScope = new() { TextWrapping = TextWrapping.Wrap, FontSize = 10.5, Margin = new Thickness(2, 5, 2, 0) };
+    private readonly TextBlock _aiScope = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(2, 5, 2, 0) };
     private readonly List<Button> _aiButtons = [];
     private readonly Button _undoButton;
     private bool _aiBusy, _running;
@@ -106,7 +106,7 @@ public sealed class PersonalizedPane : WorkPane
             IsEnabled = false,
             Padding = new Thickness(6, 1, 6, 1),
             MinHeight = 20,
-            FontSize = 10.5,
+            FontSize = 11,
             ToolTip = "직전 AI 문장 변환 전 상태로 되돌립니다.",
         };
         _undoButton.Click += (_, _) => UndoAi();
@@ -197,14 +197,13 @@ public sealed class PersonalizedPane : WorkPane
         _templates.ItemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse(TemplateItemTemplate);
         _templateName.MaxLength = 60;
         _summary.Foreground = Res<Brush>("Muted"); _summary.FontSize = 11;
-        _selectedInfo.FontWeight = FontWeights.SemiBold;
         _bodyInfo.Foreground = Res<Brush>("Muted"); _bodyInfo.FontSize = 11;
         _savedInfo.Foreground = Res<Brush>("Muted"); _savedInfo.FontSize = 11;
         _reserveSummary.Foreground = Res<Brush>("Muted"); _reserveSummary.FontSize = 11;
         _reserveSummary.Margin = new Thickness(0, 5, 0, 0);
         _status.Style = Res<Style>("StatusLine");
         _progress.Foreground = Res<Brush>("Accent"); _progress.Background = Res<Brush>("Line");
-        _grid.FontSize = 11.5; _grid.MinRowHeight = 24; _grid.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
+        _grid.FontSize = 12; _grid.MinRowHeight = 24; _grid.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
         _grid.RowHeight = 24; _grid.CanUserSortColumns = false; _grid.CanUserReorderColumns = false;
         _grid.AutomationName("개인별 대상자와 입력 데이터");
         _template.AutomationName("서식 내용"); _templateName.AutomationName("서식 제목"); _preview.AutomationName("선택한 사람의 본문");
@@ -249,19 +248,19 @@ public sealed class PersonalizedPane : WorkPane
               <DockPanel LastChildFill="True">
                 <Border x:Name="DraftTag" DockPanel.Dock="Right" Margin="6,0,0,0" Padding="6,0" CornerRadius="8" VerticalAlignment="Center"
                         Background="{DynamicResource AccentSoft}" Visibility="Collapsed">
-                  <TextBlock Text="임시 저장" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentText}"/>
+                  <TextBlock Text="임시 저장" FontSize="11" Foreground="{DynamicResource AccentText}"/>
                 </Border>
                 <Border x:Name="SentTag" DockPanel.Dock="Right" Margin="6,0,0,0" Padding="6,0" CornerRadius="8" VerticalAlignment="Center"
                         Background="{DynamicResource SuccessSoft}" Visibility="Collapsed">
-                  <TextBlock Text="발송 완료" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource Success}"/>
+                  <TextBlock Text="발송 완료" FontSize="11" Foreground="{DynamicResource Success}"/>
                 </Border>
                 <Border x:Name="PartTag" DockPanel.Dock="Right" Margin="6,0,0,0" Padding="6,0" CornerRadius="8" VerticalAlignment="Center"
                         Background="{DynamicResource WarnSoft}" Visibility="Collapsed">
-                  <TextBlock Text="일부 발송" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource Warn}"/>
+                  <TextBlock Text="일부 발송" FontSize="11" Foreground="{DynamicResource Warn}"/>
                 </Border>
-                <TextBlock Text="{Binding Headline}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                <TextBlock Text="{Binding Headline}" TextTrimming="CharacterEllipsis"/>
               </DockPanel>
-              <TextBlock Text="{Binding Detail}" FontSize="10.5" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis"/>
+              <TextBlock Text="{Binding Detail}" FontSize="11" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis"/>
             </StackPanel>
             <Button x:Name="RemoveButton" Grid.Column="1" Style="{DynamicResource IconButton}" Content="&#xE711;" Tag="{Binding Id}"
                     ToolTip="이 저장 작업 삭제" AutomationProperties.Name="저장 작업 삭제" Width="22" Height="22"/>
@@ -326,7 +325,7 @@ public sealed class PersonalizedPane : WorkPane
 
     private static TextBlock FieldLabel(string text, bool top = false) => new()
     {
-        Text = text, FontWeight = FontWeights.SemiBold, FontSize = 11.5, Margin = new Thickness(0, top ? 5 : 0, 8, 0),
+        Text = text, FontSize = 12, Margin = new Thickness(0, top ? 5 : 0, 8, 0),
         VerticalAlignment = top ? VerticalAlignment.Top : VerticalAlignment.Center
     };
 
@@ -338,7 +337,7 @@ public sealed class PersonalizedPane : WorkPane
         var toggleContent = new StackPanel { Orientation = Orientation.Horizontal };
         _savedChevron.FontFamily = (FontFamily)FindResource("IconFont"); _savedChevron.FontSize = 10; _savedChevron.VerticalAlignment = VerticalAlignment.Center; _savedChevron.Margin = new Thickness(0, 0, 6, 0);
         toggleContent.Children.Add(_savedChevron);
-        toggleContent.Children.Add(new TextBlock { Text = "저장한 작업", FontWeight = FontWeights.Bold, FontSize = 13, VerticalAlignment = VerticalAlignment.Center });
+        toggleContent.Children.Add(new TextBlock { Text = "저장한 작업", FontWeight = FontWeights.Bold, FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
         _savedCount.Foreground = Res<Brush>("Muted"); _savedCount.FontSize = 11; _savedCount.VerticalAlignment = VerticalAlignment.Center; _savedCount.Margin = new Thickness(6, 0, 0, 0);
         toggleContent.Children.Add(_savedCount);
         var toggle = new Button
@@ -422,7 +421,7 @@ public sealed class PersonalizedPane : WorkPane
         Place(_fieldChips, 3, 1, 2, new Thickness(0));
         Place(_templateCheck, 4, 1, 2, new Thickness(0, 2, 0, 0));
 
-        return Section("1", "서식", "모든 대상에게 쓸 공통 문안입니다. 중괄호 변수는 사람마다 다른 값으로 바뀝니다. ②에서 만든 항목은 모두 서식에 넣어야 합니다.", grid);
+        return Section("1", "서식", "", grid);
     }
 
     private UIElement BuildRecipientSection()
@@ -438,7 +437,7 @@ public sealed class PersonalizedPane : WorkPane
         var help = TableHelpButton();
         var right = new StackPanel { Orientation = Orientation.Horizontal };
         right.Children.Add(_summary); right.Children.Add(help);
-        return Section("2", "대상자와 개인별 데이터", "조직도에서 고른 사람과 사람마다 다른 값을 확인합니다.", body, right);
+        return Section("2", "대상자와 개인별 데이터", "", body, right);
     }
 
     /// <summary>②의 표 사용법을 보여 주는 ‘?’ 단추.</summary>
@@ -491,7 +490,7 @@ public sealed class PersonalizedPane : WorkPane
         body.Children.Add(nav);
 
         var generate = Btn("서식으로 본문 생성 · 다시 생성", (_, _) => GenerateBodies(), style: "PrimaryButton", tip: "①의 서식과 ②의 값을 합쳐 미발송 대상의 본문을 만듭니다.");
-        return Section("3", "본문 확인과 수정", "사람을 고르면 본문이 나타납니다. 필요한 경우 한 사람씩 직접 고치거나 AI로 다듬을 수 있습니다.", body, generate);
+        return Section("3", "본문 확인과 수정", "", body, generate);
     }
 
     private Border BuildAiPanel()
@@ -504,7 +503,7 @@ public sealed class PersonalizedPane : WorkPane
         header.Children.Add(new TextBlock
         {
             Text = "✦ AI 문장 다듬기",
-            FontWeight = FontWeights.SemiBold,
+           
             FontSize = 11,
             Foreground = Res<Brush>("AccentText"),
             VerticalAlignment = VerticalAlignment.Center,
@@ -557,7 +556,7 @@ public sealed class PersonalizedPane : WorkPane
 
         _useSms.ToolTip = "온톡 쪽지 창의 ‘SMS 발송’ 확인란을 선택한 상태로 모든 대상에게 보냅니다.";
         body.Children.Add(_useSms);
-        return Section("5", "발송 방식", "기본은 즉시 발송입니다. 예약하면 모든 대상에게 같은 예약 시각이 적용되며, SMS 발송도 모든 대상에게 똑같이 적용됩니다.", body);
+        return Section("5", "발송 방식", "", body);
     }
 
     private UIElement BuildAttachmentSection()
@@ -569,7 +568,7 @@ public sealed class PersonalizedPane : WorkPane
         body.Children.Add(bar);
         body.Children.Add(_attachList);
         body.Children.Add(_attachSummary);
-        var section = Section("4", "첨부 파일", "모든 대상에게 같은 파일을 붙입니다. 필요 없으면 비워 두세요.", body);
+        var section = Section("4", "첨부 파일", "", body);
         section.AllowDrop = true;
         section.DragOver += (_, e) =>
         {
@@ -1170,13 +1169,11 @@ public sealed class PersonalizedPane : WorkPane
         {
             _aiScope.Text = $"선택 구간만 변환 ({len}자)";
             _aiScope.Foreground = Res<Brush>("AccentText");
-            _aiScope.FontWeight = FontWeights.SemiBold;
         }
         else
         {
             _aiScope.Text = "블럭 지정 시 그 구간만, 없으면 이 사람의 전체 본문 변환";
             _aiScope.Foreground = Res<Brush>("Muted");
-            _aiScope.FontWeight = FontWeights.Normal;
         }
     }
 
