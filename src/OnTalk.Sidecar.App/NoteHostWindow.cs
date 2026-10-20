@@ -11,6 +11,28 @@ namespace OnTalk.Sidecar.App;
 public enum NoteTab { Note, Personalized }
 
 /// <summary>
+/// 쪽지 보내기 창의 촘촘한 화면 값. 창은 900×900의 2/3(600×600)로 줄였고, 높이·여백은 그에 비례해 줄이되
+/// 글자와 누르는 칸은 읽고 누르기 어려워지지 않도록 덜 줄였다(글자 13→12, 단추·입력칸 32~34→22~26).
+/// </summary>
+internal static class Density
+{
+    public static IEnumerable<KeyValuePair<string, object>> Compact { get; } =
+    [
+        new("CtlMinHeight", 26d), new("CtlPadding", new Thickness(10, 0, 10, 0)),
+        new("SmallMinHeight", 22d), new("SmallPadding", new Thickness(8, 0, 8, 0)),
+        new("FieldMinHeight", 26d), new("FieldPadding", new Thickness(8, 0, 8, 0)),
+        new("MultilinePadding", new Thickness(8, 6, 8, 6)),
+        new("ComboPadding", new Thickness(8, 0, 24, 0)), new("ComboItemPadding", new Thickness(8, 4, 8, 4)),
+        new("GridHeaderHeight", 24d), new("GridRowMinHeight", 24d), new("GridCellPadding", new Thickness(8, 0, 8, 0)),
+        new("TabHeight", 24d), new("TabRadius", new CornerRadius(12)), new("TabBarRadius", new CornerRadius(15)),
+        new("TabBarPadding", new Thickness(2)), new("TabBarMargin", new Thickness(8, 0, 8, 4)),
+        new("CheckSize", 15d),
+        new("FontSmall", 11d), new("LineSmall", 15d), new("FontCaption", 10.5), new("LineCaption", 14d),
+        new("FontPageTitle", 15d),
+    ];
+}
+
+/// <summary>
 /// 쪽지 보내기 창. ‘쪽지’(같은 내용을 모두에게)와 ‘개인별 쪽지’(사람마다 다른 내용) 두 화면을 탭으로 묶는다.
 /// 조직도에서 고른 직원은 두 탭 모두에 같은 받는 사람·대상자로 들어간다.
 /// </summary>
@@ -47,7 +69,7 @@ public sealed class NoteHostWindow : Window
         (Note, Personalized) = (note, personalized);
         Title = "쪽지 보내기";
         Configure();
-        _tabs = new TabControl { Style = (Style)FindResource("PillTabs"), Margin = new Thickness(0, 10, 0, 0) };
+        _tabs = new TabControl { Style = (Style)FindResource("PillTabs"), Margin = new Thickness(0, 6, 0, 0) };
         foreach (var (header, pane) in new (string, WorkPane)[] { ("쪽지", note), ("개인별 쪽지", personalized) })
         {
             var tab = new TabItem { Header = header, Content = pane };
@@ -77,9 +99,12 @@ public sealed class NoteHostWindow : Window
 
     private void Configure()
     {
-        Width = 900; Height = Math.Min(900, SystemParameters.WorkArea.Height - 40); MinWidth = 700; MinHeight = 560;
+        Width = 600; Height = Math.Min(600, SystemParameters.WorkArea.Height - 40); MinWidth = 540; MinHeight = 380;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Style = (Style)FindResource("AppWindow");
+        FontSize = 12;
+        // 작은 창에 맞춰 단추·입력칸·탭의 높이와 안쪽 여백을 줄인다. 키는 Theme.xaml의 밀도 값이고, 이 창 안에서만 바뀐다.
+        foreach (var (key, value) in Density.Compact) Resources[key] = value;
     }
 
     private void Wire(WorkPane pane)

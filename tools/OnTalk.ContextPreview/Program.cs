@@ -174,9 +174,11 @@ internal static class Program
         var hostTabs = (TabControl)host.Content;
         if (hostTabs.Items.Count != 2 || ((TabItem)hostTabs.Items[0]).Header as string != "쪽지" || ((TabItem)hostTabs.Items[1]).Header as string != "개인별 쪽지")
             throw new InvalidOperationException("쪽지 창 탭 이름이 맞지 않습니다.");
-        Render(hostTabs, Path.Combine(output, "note-host-note.png"), 900, 900);
+        Render(hostTabs, Path.Combine(output, "note-host-note.png"), 600, 600);
+        Render(hostTabs, Path.Combine(output, "note-host-note-min.png"), 540, 380);
         hostTabs.SelectedIndex = 1;
-        Render(hostTabs, Path.Combine(output, "note-host-personalized.png"), 900, 900);
+        Render(hostTabs, Path.Combine(output, "note-host-personalized.png"), 600, 600);
+        Render(hostTabs, Path.Combine(output, "note-host-personalized-min.png"), 540, 380);
         var groupNote = new GroupNotePane(store, preparationWriter, new ContactPreparation([personA, personB], "온톡 조직도 선택", DateTimeOffset.Now),
             new PreviewPersonalizedAutomation([personA, personB]));
         var groupSend = (Button)Get(groupNote, "_sendButton");
@@ -186,11 +188,9 @@ internal static class Program
         if (!groupSend.IsEnabled) throw new InvalidOperationException("같은 쪽지 발송 단추가 켜지지 않았습니다.");
         Render((FrameworkElement)groupNote.Content, Path.Combine(output, "group-note.png"), 760, 860);
         Render((FrameworkElement)groupNote.Content, Path.Combine(output, "group-note-short.png"), 620, 560);
+        Render((FrameworkElement)groupNote.Content, Path.Combine(output, "group-note-full.png"), 600, 1100);
         store.SaveTemplate("개인별 인사평정 결과 안내", "안녕하세요.\n인사평정 결과(순위) : {평정순위}\n이의가 있는 경우 별도 연락 바랍니다.");
         Invoke(groupNote, "ReloadTemplates", "개인별 인사평정 결과 안내");
-        ((TextBox)Get(groupNote, "_aiProposal")).Text = "안녕하세요.\n10월 정기 점검 일정을 안내드립니다.\n\n일시: 10월 22일(수) 14:00\n장소: 3층 회의실\n\n참석 가능 여부를 회신해 주시면 감사하겠습니다.";
-        Invoke(groupNote, "ShowAi");
-        Render((FrameworkElement)groupNote.Content, Path.Combine(output, "group-note-ai.png"), 1000, 860);
         var personal = new PersonalizedPane(
             store,
             new OllamaWriter(),
@@ -211,7 +211,7 @@ internal static class Program
         ((TextBox)Get(personal, "_preview")).Text = "개별 수정한 본문";
         grid.SelectedIndex = 1;
         if (work.Items[0].Body != "개별 수정한 본문") throw new InvalidOperationException("개별 수정 유실");
-        Render((FrameworkElement)personal.Content, Path.Combine(output, "personalized-notes.png"), 900, 900);
+        Render((FrameworkElement)personal.Content, Path.Combine(output, "personalized-notes.png"), 600, 600);
         var keptValue = work.Items[1].Values["교육일시"]; work.Items[1].Values["교육일시"] = "";
         Invoke(personal, "RefreshGrid");
         Render((FrameworkElement)personal.Content, Path.Combine(output, "personalized-notes-empty.png"), 900, 900);
@@ -220,7 +220,7 @@ internal static class Program
         foreach (var w in new[] { work, new PersonalizedWork { Template = "안내", Items = work.Items } })
             savedList.Children.Add(new ComboBoxItem { Content = w, ContentTemplate = ((ComboBox)Get(personal, "_saved")).ItemTemplate });
         Render(savedList, Path.Combine(output, "personalized-saved-list.png"), 520, 140);
-        Render((FrameworkElement)personal.Content, Path.Combine(output, "personalized-notes-full.png"), 900, 1700);
+        Render((FrameworkElement)personal.Content, Path.Combine(output, "personalized-notes-full.png"), 600, 1500);
         Render((FrameworkElement)personal.Content, Path.Combine(output, "personalized-notes-short.png"), 700, 560);
         Finish(personal.RunBatchAsync());
         if (work.Items.Any(i => !i.Attempted || !i.Status.Contains("발송 완료")))

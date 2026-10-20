@@ -34,10 +34,10 @@ public sealed class GroupNotePane : WorkPane
     // ① 받는 사람
     private readonly WrapPanel _chips = new();
     private readonly TextBlock _recipientSummary = new() { VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBlock _identityWarn = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 4, 0, 0) };
+    private readonly TextBlock _identityWarn = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 3, 0, 0) };
     private readonly TextBox _recipientSearch = new() { MaxLength = 40 };
     private readonly Button _searchRecipientButton;
-    private readonly Border _candidateBorder = new() { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 6, 0, 0), Padding = new Thickness(10, 8, 10, 8), CornerRadius = new CornerRadius(8) };
+    private readonly Border _candidateBorder = new() { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 4, 0, 0), Padding = new Thickness(8, 6, 8, 6), CornerRadius = new CornerRadius(6) };
     private readonly StackPanel _candidateList = new();
     private readonly ComboBox _groups = new();
     private readonly TextBox _groupName = new() { MaxLength = 40 };
@@ -45,10 +45,10 @@ public sealed class GroupNotePane : WorkPane
     // ② 본문 + 오른쪽 AI 문장 다듬기 패널
     private readonly ComboBox _templates = new();
     private readonly TextBox _templateName = new() { MaxLength = 60 };
-    private readonly TextBox _editor = new() { Height = 220, IsInactiveSelectionHighlightEnabled = true };
+    private readonly TextBox _editor = new() { Height = 168, IsInactiveSelectionHighlightEnabled = true, VerticalAlignment = VerticalAlignment.Top };
     private readonly TextBlock _bytes = new() { VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBlock _bodyWarn = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0), Visibility = Visibility.Collapsed };
-    private readonly TextBlock _aiScope = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11.5, Margin = new Thickness(2, 8, 2, 0) };
+    private readonly TextBlock _bodyWarn = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0), Visibility = Visibility.Collapsed };
+    private readonly TextBlock _aiScope = new() { TextWrapping = TextWrapping.Wrap, FontSize = 10.5, Margin = new Thickness(2, 5, 2, 0) };
     private readonly List<Button> _aiButtons = [];
     private readonly Button _undoButton;
     private bool _applyingTemplate;
@@ -59,28 +59,28 @@ public sealed class GroupNotePane : WorkPane
     private long _undoRevision = -1;
 
     // ③ 발송 방식
-    private readonly CheckBox _useReservation = new() { Content = "예약 발송", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 14, 0) };
-    private readonly DatePicker _reserveDate = new() { Width = 140, Margin = new Thickness(0, 0, 8, 0) };
-    private readonly ComboBox _reserveHour = new() { Width = 70, Margin = new Thickness(0, 0, 4, 0) };
-    private readonly ComboBox _reserveMinute = new() { Width = 70, Margin = new Thickness(0, 0, 4, 0) };
+    private readonly CheckBox _useReservation = new() { Content = "예약 발송", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
+    private readonly DatePicker _reserveDate = new() { Width = 110, Margin = new Thickness(0, 0, 6, 0) };
+    private readonly ComboBox _reserveHour = new() { Width = 56, Margin = new Thickness(0, 0, 3, 0) };
+    private readonly ComboBox _reserveMinute = new() { Width = 56, Margin = new Thickness(0, 0, 3, 0) };
     private readonly StackPanel _reservePickers = new() { Orientation = Orientation.Horizontal };
-    private readonly TextBlock _reserveSummary = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 8, 0, 0) };
+    private readonly TextBlock _reserveSummary = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 5, 0, 0) };
     private readonly CheckBox _useSms = new() { Content = "SMS 발송", VerticalAlignment = VerticalAlignment.Center };
 
     // 첨부 파일. 파일 자체는 복사하지 않고 경로만 들고 있다가, 발송 때 온톡의 파일 선택창으로 붙인다.
     private readonly List<string> _attachments = [];
     private readonly StackPanel _attachList = new();
-    private readonly TextBlock _attachSummary = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0) };
+    private readonly TextBlock _attachSummary = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0) };
     private UIElement? _attachSection;
 
     // 하단 줄
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly ProgressBar _progress = new() { Height = 4, Minimum = 0, Maximum = 1, BorderThickness = new Thickness(0), Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 8) };
+    private readonly ProgressBar _progress = new() { Height = 3, Minimum = 0, Maximum = 1, BorderThickness = new Thickness(0), Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 5) };
     private readonly ScrollViewer _page = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly Button _stopButton, _prepareButton, _sendButton;
     private readonly List<UIElement> _interactive = [];
     private readonly Button _saveDraftButton, _deleteDraftButton;
-    private readonly TextBlock _draftInfo = new() { VerticalAlignment = VerticalAlignment.Center, FontSize = 12, Margin = new Thickness(4, 0, 0, 0) };
+    private readonly TextBlock _draftInfo = new() { VerticalAlignment = VerticalAlignment.Center, FontSize = 11, Margin = new Thickness(2, 0, 0, 0) };
     private readonly CancellationTokenSource _closing = new();
     private CancellationTokenSource? _runCts;
     // 전송 단추를 누른 적이 있으면 이 창에서는 같은 쪽지를 다시 보내지 않는다.
@@ -129,18 +129,18 @@ public sealed class GroupNotePane : WorkPane
             Style = Res<Style>("SmallButton"),
             Focusable = false,
             IsEnabled = false,
-            Padding = new Thickness(8, 2, 8, 2),
-            MinHeight = 24,
-            FontSize = 11.5,
+            Padding = new Thickness(6, 1, 6, 1),
+            MinHeight = 20,
+            FontSize = 10.5,
             ToolTip = "직전 AI 문장 변환 전 상태로 되돌립니다.",
         };
         _undoButton.Click += (_, _) => UndoAi();
 
         StyleControls();
-        var page = new StackPanel { Margin = new Thickness(20, 16, 20, 12) };
+        var page = new StackPanel { Margin = new Thickness(12, 10, 12, 6) };
         // 탭 이름이 이미 ‘쪽지’이므로, 일반 새 쪽지가 아닌 경우(답장·선택 직원)에만 어떤 작업인지 제목으로 밝힌다.
         if (preparation is { People.Count: > 0 } || source is not null)
-            page.Children.Add(new TextBlock { Text = pageTitle, Style = Res<Style>("PageTitle"), Margin = new Thickness(2, 0, 0, 12) });
+            page.Children.Add(new TextBlock { Text = pageTitle, Style = Res<Style>("PageTitle"), Margin = new Thickness(2, 0, 0, 8) });
         page.Children.Add(BuildRecipientSection());
         page.Children.Add(BuildBodySection());
         page.Children.Add(BuildAttachmentSection());
@@ -196,7 +196,7 @@ public sealed class GroupNotePane : WorkPane
 
     private Button Btn(string title, RoutedEventHandler handler, bool track = true, string? style = null, string? tip = null)
     {
-        var button = new Button { Content = title, Margin = new Thickness(0, 0, 8, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        var button = new Button { Content = title, Margin = new Thickness(0, 0, 6, 0), HorizontalAlignment = HorizontalAlignment.Left };
         if (style is not null) button.Style = Res<Style>(style);
         if (tip is not null) button.ToolTip = tip;
         button.Click += handler;
@@ -209,7 +209,7 @@ public sealed class GroupNotePane : WorkPane
         var multiline = Res<Style>("MultilineBox");
         _editor.Style = multiline;
         _editor.Tag = "보낼 쪽지 내용을 입력하세요. 특정 문장만 다듬으려면 마우스로 블럭 지정한 뒤 오른쪽 AI 단추를 누르세요.";
-        _editor.FontSize = 14;
+        _editor.FontSize = 13;
         var field = Res<Style>("FieldBox");
         _templateName.Style = field; _templateName.Tag = "서식 제목";
         _recipientSearch.Style = field; _recipientSearch.Tag = "이름으로 받는 사람 찾기 (Enter)";
@@ -271,13 +271,13 @@ public sealed class GroupNotePane : WorkPane
         body.Children.Add(_chips);
         body.Children.Add(_identityWarn);
 
-        var searchRow = new Grid { Margin = new Thickness(0, 6, 0, 0) };
-        searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
+        var searchRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+        searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(62) });
         searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var searchLabel = new TextBlock { Text = "사람 추가", FontWeight = FontWeights.SemiBold, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+        var searchLabel = new TextBlock { Text = "사람 추가", FontWeight = FontWeights.SemiBold, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
         Grid.SetColumn(searchLabel, 0);
-        _recipientSearch.Margin = new Thickness(0, 0, 8, 0);
+        _recipientSearch.Margin = new Thickness(0, 0, 6, 0);
         Grid.SetColumn(_recipientSearch, 1);
         _searchRecipientButton.Margin = new Thickness(0);
         Grid.SetColumn(_searchRecipientButton, 2);
@@ -287,13 +287,14 @@ public sealed class GroupNotePane : WorkPane
         body.Children.Add(searchRow);
         body.Children.Add(_candidateBorder);
 
-        var groupRow = new Grid { Margin = new Thickness(0, 8, 0, 0) };
-        groupRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
+        // 좁은 창에서도 한 줄에 다 들어가도록 고르기와 새 그룹 저장을 두 줄로 나눈다.
+        var groupRow = new Grid { Margin = new Thickness(0, 5, 0, 0) };
+        groupRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(62) });
         groupRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         groupRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        groupRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(130) });
-        groupRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var groupLabel = new TextBlock { Text = "수신 그룹", FontWeight = FontWeights.SemiBold, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+        groupRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        groupRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var groupLabel = new TextBlock { Text = "수신 그룹", FontWeight = FontWeights.SemiBold, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
         Grid.SetColumn(groupLabel, 0);
         _groups.Margin = new Thickness(0, 0, 6, 0);
         Grid.SetColumn(_groups, 1);
@@ -301,11 +302,11 @@ public sealed class GroupNotePane : WorkPane
         groupButtonsLeft.Children.Add(Btn("그룹 넣기", (_, _) => AddSelectedGroup(), style: "SmallButton", tip: "선택한 그룹의 구성원을 받는 사람에 추가합니다."));
         groupButtonsLeft.Children.Add(Btn("삭제", (_, _) => DeleteSelectedGroup(), style: "SmallButton", tip: "선택한 수신 그룹을 지웁니다."));
         Grid.SetColumn(groupButtonsLeft, 2);
-        _groupName.Margin = new Thickness(4, 0, 6, 0);
-        Grid.SetColumn(_groupName, 3);
+        _groupName.Margin = new Thickness(0, 5, 6, 0);
+        Grid.SetRow(_groupName, 1); Grid.SetColumn(_groupName, 1);
         var saveGroupBtn = Btn("그룹 저장", (_, _) => SaveCurrentGroup(), style: "SmallButton", tip: "지금 선택된 받는 사람들을 이 그룹 이름으로 저장합니다.");
-        saveGroupBtn.Margin = new Thickness(0);
-        Grid.SetColumn(saveGroupBtn, 4);
+        saveGroupBtn.Margin = new Thickness(0, 5, 0, 0);
+        Grid.SetRow(saveGroupBtn, 1); Grid.SetColumn(saveGroupBtn, 2);
         groupRow.Children.Add(groupLabel);
         groupRow.Children.Add(_groups);
         groupRow.Children.Add(groupButtonsLeft);
@@ -337,8 +338,8 @@ public sealed class GroupNotePane : WorkPane
             {
                 Text = "아직 받는 사람이 없습니다. 아래에서 이름을 검색해 추가하거나 수신 그룹을 넣으세요.",
                 Foreground = Res<Brush>("Muted"),
-                FontSize = 12.5,
-                Margin = new Thickness(0, 0, 0, 4),
+                FontSize = 11.5,
+                Margin = new Thickness(0, 0, 0, 3),
             });
         }
         // 이름·직급·소속이 같은 대상은 빨강, 이름만 같은 동명이인은 주황으로 칩을 물들여 어느 사람인지 바로 보이게 한다.
@@ -357,7 +358,7 @@ public sealed class GroupNotePane : WorkPane
             var tag = isDuplicate ? (sameIdentity.Count > 1 ? $" · 중복{dupGroup + 1}" : " · 중복") : isNamesake ? " · 동명" : "";
             var label = new TextBlock
             {
-                Text = $"{person.Name}{titlePart}{tag}", VerticalAlignment = VerticalAlignment.Center, FontSize = 12.5,
+                Text = $"{person.Name}{titlePart}{tag}", VerticalAlignment = VerticalAlignment.Center, FontSize = 11.5,
                 TextDecorations = excluded ? TextDecorations.Strikethrough : null,
                 FontWeight = isDuplicate ? FontWeights.SemiBold : FontWeights.Normal,
             };
@@ -366,15 +367,15 @@ public sealed class GroupNotePane : WorkPane
             row.Children.Add(label);
             var toggle = new Button
             {
-                Content = excluded ? "" : "", Style = Res<Style>("IconButton"), Width = 20, Height = 20, FontSize = 9,
-                Margin = new Thickness(4, 0, -4, 0), ToolTip = excluded ? "다시 넣기" : "빼기", VerticalAlignment = VerticalAlignment.Center,
+                Content = excluded ? "" : "", Style = Res<Style>("IconButton"), Width = 17, Height = 17, FontSize = 8,
+                Margin = new Thickness(3, 0, -3, 0), ToolTip = excluded ? "다시 넣기" : "빼기", VerticalAlignment = VerticalAlignment.Center,
             };
             toggle.AutomationName((excluded ? "다시 넣기 " : "빼기 ") + person.Name);
             toggle.Click += (_, _) => { if (!_excluded.Remove(person.SelectionKey)) _excluded.Add(person.SelectionKey); RefreshRecipients(); };
             row.Children.Add(toggle);
             _chips.Children.Add(new Border
             {
-                Child = row, Padding = new Thickness(10, 3, 6, 3), Margin = new Thickness(0, 0, 6, 6), CornerRadius = new CornerRadius(13),
+                Child = row, Padding = new Thickness(8, 2, 4, 2), Margin = new Thickness(0, 0, 4, 4), CornerRadius = new CornerRadius(11),
                 Background = Res<Brush>(isDuplicate ? "DangerSoft" : isNamesake ? "WarnSoft" : excluded ? "Surface" : "SurfaceAlt"),
                 BorderBrush = Res<Brush>(isDuplicate ? "Danger" : isNamesake ? "WarnLine" : "Line"),
                 BorderThickness = new Thickness(isDuplicate ? 1.5 : 1),
@@ -500,8 +501,8 @@ public sealed class GroupNotePane : WorkPane
         {
             Text = $"‘{query}’ 검색 결과 {rows.Count}명 · 추가할 사람을 고르세요",
             FontWeight = FontWeights.SemiBold,
-            FontSize = 12,
-            Margin = new Thickness(0, 0, 0, 6),
+            FontSize = 11,
+            Margin = new Thickness(0, 0, 0, 4),
         });
         var checks = new List<(CheckBox Box, ContactPerson Person)>();
         foreach (var row in rows)
@@ -510,13 +511,13 @@ public sealed class GroupNotePane : WorkPane
             var box = new CheckBox
             {
                 Content = person.Label,
-                Margin = new Thickness(0, 2, 0, 2),
+                Margin = new Thickness(0, 1, 0, 1),
                 IsChecked = rows.Count == 1,
             };
             checks.Add((box, person));
             _candidateList.Children.Add(box);
         }
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
         actions.Children.Add(Btn("선택 추가", (_, _) =>
         {
             var picked = checks.Where(c => c.Box.IsChecked == true).Select(c => c.Person).ToList();
@@ -590,32 +591,32 @@ public sealed class GroupNotePane : WorkPane
     private UIElement BuildBodySection()
     {
         var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(84) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         for (var i = 0; i < 2; i++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         void Place(UIElement el, int row, int col, int span = 1, Thickness? margin = null)
         {
             Grid.SetRow(el, row); Grid.SetColumn(el, col); Grid.SetColumnSpan(el, span);
-            if (el is FrameworkElement fe) fe.Margin = margin ?? new Thickness(0, 0, 0, 8);
+            if (el is FrameworkElement fe) fe.Margin = margin ?? new Thickness(0, 0, 0, 5);
             grid.Children.Add(el);
         }
-        TextBlock Label(string text) => new() { Text = text, FontWeight = FontWeights.SemiBold, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center };
+        TextBlock Label(string text) => new() { Text = text, FontWeight = FontWeights.SemiBold, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center };
 
-        Place(Label("저장된 서식"), 0, 0, margin: new Thickness(0, 0, 12, 8));
-        Place(_templates, 0, 1, margin: new Thickness(0, 0, 8, 8));
+        Place(Label("저장된 서식"), 0, 0, margin: new Thickness(0, 0, 8, 5));
+        Place(_templates, 0, 1, margin: new Thickness(0, 0, 6, 5));
         Place(Btn("서식 삭제", (_, _) => DeleteSelectedTemplate(), style: "SmallButton", tip: "고른 저장 서식을 목록에서 지웁니다."), 0, 2);
-        Place(Label("서식 제목"), 1, 0, margin: new Thickness(0, 0, 12, 8));
-        Place(_templateName, 1, 1, margin: new Thickness(0, 0, 8, 8));
+        Place(Label("서식 제목"), 1, 0, margin: new Thickness(0, 0, 8, 5));
+        Place(_templateName, 1, 1, margin: new Thickness(0, 0, 6, 5));
         Place(Btn("서식 저장", (_, _) => SaveTemplate(), style: "SmallButton", tip: "지금 내용을 이 제목의 서식으로 저장합니다. 같은 제목이 있으면 바꿉니다."), 1, 2);
 
         var body = new StackPanel();
         body.Children.Add(grid);
 
         // 본문(왼쪽)과 AI 문장 다듬기 패널(오른쪽)을 나란히 배치한다.
-        var compare = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+        var compare = new Grid { Margin = new Thickness(0, 2, 0, 0) };
         compare.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        compare.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(228) });
+        compare.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(178) });
         compare.Children.Add(_editor);
 
         var aiPanel = BuildAiPanel();
@@ -631,14 +632,14 @@ public sealed class GroupNotePane : WorkPane
     {
         var stack = new StackPanel();
 
-        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
+        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 3) };
         DockPanel.SetDock(_undoButton, Dock.Right);
         header.Children.Add(_undoButton);
         header.Children.Add(new TextBlock
         {
             Text = "✦ AI 문장 다듬기",
             FontWeight = FontWeights.SemiBold,
-            FontSize = 12.5,
+            FontSize = 11,
             Foreground = Res<Brush>("AccentText"),
             VerticalAlignment = VerticalAlignment.Center,
         });
@@ -652,8 +653,9 @@ public sealed class GroupNotePane : WorkPane
                 Content = preset.Label,
                 Style = Res<Style>("SmallButton"),
                 Focusable = false,
-                Margin = new Thickness(2),
-                MinHeight = 36,
+                Margin = new Thickness(1.5),
+                Padding = new Thickness(3, 0, 3, 0),
+                MinHeight = 26,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Center,
                 ToolTip = preset.Description,
@@ -668,12 +670,12 @@ public sealed class GroupNotePane : WorkPane
 
         return new Border
         {
-            Margin = new Thickness(10, 0, 0, 0),
+            Margin = new Thickness(8, 0, 0, 0),
             Background = Res<Brush>("AccentSoft"),
             BorderBrush = (Brush)new BrushConverter().ConvertFromString("#CFDBFF")!,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(10),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(7),
             Child = stack,
         };
     }
@@ -682,7 +684,7 @@ public sealed class GroupNotePane : WorkPane
     {
         _reservePickers.Children.Add(_reserveDate);
         _reservePickers.Children.Add(_reserveHour);
-        _reservePickers.Children.Add(new TextBlock { Text = "시", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) });
+        _reservePickers.Children.Add(new TextBlock { Text = "시", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
         _reservePickers.Children.Add(_reserveMinute);
         _reservePickers.Children.Add(new TextBlock { Text = "분", VerticalAlignment = VerticalAlignment.Center });
         var body = new StackPanel();
@@ -691,7 +693,7 @@ public sealed class GroupNotePane : WorkPane
         row.Children.Add(_reservePickers);
         body.Children.Add(row);
         body.Children.Add(_reserveSummary);
-        _useSms.Margin = new Thickness(0, 10, 0, 0);
+        _useSms.Margin = new Thickness(0, 6, 0, 0);
         _useSms.ToolTip = "온톡 쪽지 창의 ‘SMS 발송’ 확인란을 선택한 상태로 보냅니다.";
         body.Children.Add(_useSms);
         return WorkUi.Section(this, "4", "발송 방식", "", body);
@@ -753,13 +755,13 @@ public sealed class GroupNotePane : WorkPane
         _attachList.Children.Clear();
         foreach (var path in _attachments.ToList())
         {
-            var row = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+            var row = new Grid { Margin = new Thickness(0, 3, 0, 0) };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var size = new FileInfo(path) is { Exists: true } info ? NoteAttachments.Size(info.Length) : "파일 없음";
             row.Children.Add(new TextBlock { Text = "📎 " + Path.GetFileName(path), ToolTip = path, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
-            var sizeText = new TextBlock { Text = size, Foreground = Res<Brush>("Muted"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 8, 0) };
+            var sizeText = new TextBlock { Text = size, Foreground = Res<Brush>("Muted"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 6, 0) };
             Grid.SetColumn(sizeText, 1); row.Children.Add(sizeText);
             var remove = new Button { Content = "✕", Style = Res<Style>("SmallButton"), ToolTip = "첨부에서 뺍니다(원본 파일은 그대로)." };
             remove.AutomationName("첨부 제거 " + Path.GetFileName(path));
@@ -777,9 +779,9 @@ public sealed class GroupNotePane : WorkPane
 
     private UIElement BuildActionBar()
     {
-        var bar = new StackPanel { Margin = new Thickness(20, 10, 20, 12) };
+        var bar = new StackPanel { Margin = new Thickness(12, 7, 12, 8) };
         bar.Children.Add(_progress);
-        bar.Children.Add(new ScrollViewer { MaxHeight = 72, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 0, 0, 8), Content = _status });
+        bar.Children.Add(new ScrollViewer { MaxHeight = 52, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 0, 0, 5), Content = _status });
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         buttons.Children.Add(_stopButton);
         buttons.Children.Add(_prepareButton);

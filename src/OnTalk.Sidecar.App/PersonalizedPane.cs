@@ -28,20 +28,20 @@ public sealed class PersonalizedPane : WorkPane
     // ① 서식
     private readonly ComboBox _templates = new();
     private readonly TextBox _templateName = new();
-    private readonly TextBox _template = new() { Height = 120 };
+    private readonly TextBox _template = new() { Height = 84 };
     private readonly WrapPanel _fieldChips = new();
-    private readonly TextBlock _templateCheck = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+    private readonly TextBlock _templateCheck = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11 };
     private bool _applyingTemplate;
 
     // ② 대상자
-    private readonly DataGrid _grid = new() { AutoGenerateColumns = false, CanUserAddRows = false, CanUserDeleteRows = false, Height = 240, SelectionMode = DataGridSelectionMode.Single };
+    private readonly DataGrid _grid = new() { AutoGenerateColumns = false, CanUserAddRows = false, CanUserDeleteRows = false, Height = 168, SelectionMode = DataGridSelectionMode.Single };
     private readonly TextBlock _summary = new() { Style = null, VerticalAlignment = VerticalAlignment.Center };
 
     // ③ 본문
     private readonly TextBlock _selectedInfo = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBlock _bodyInfo = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
-    private readonly TextBox _preview = new() { Height = 170, IsInactiveSelectionHighlightEnabled = true };
-    private readonly TextBlock _aiScope = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11.5, Margin = new Thickness(2, 8, 2, 0) };
+    private readonly TextBlock _bodyInfo = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+    private readonly TextBox _preview = new() { Height = 150, IsInactiveSelectionHighlightEnabled = true };
+    private readonly TextBlock _aiScope = new() { TextWrapping = TextWrapping.Wrap, FontSize = 10.5, Margin = new Thickness(2, 5, 2, 0) };
     private readonly List<Button> _aiButtons = [];
     private readonly Button _undoButton;
     private bool _aiBusy, _running;
@@ -53,23 +53,23 @@ public sealed class PersonalizedPane : WorkPane
     private readonly CancellationTokenSource _closing = new();
 
     // ⑤ 발송 방식
-    private readonly CheckBox _useReservation = new() { Content = "예약 발송", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 14, 0) };
-    private readonly DatePicker _reserveDate = new() { Width = 140, Margin = new Thickness(0, 0, 8, 0) };
-    private readonly ComboBox _reserveHour = new() { Width = 70, Margin = new Thickness(0, 0, 4, 0) };
-    private readonly ComboBox _reserveMinute = new() { Width = 70, Margin = new Thickness(0, 0, 4, 0) };
+    private readonly CheckBox _useReservation = new() { Content = "예약 발송", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
+    private readonly DatePicker _reserveDate = new() { Width = 110, Margin = new Thickness(0, 0, 6, 0) };
+    private readonly ComboBox _reserveHour = new() { Width = 56, Margin = new Thickness(0, 0, 3, 0) };
+    private readonly ComboBox _reserveMinute = new() { Width = 56, Margin = new Thickness(0, 0, 3, 0) };
     private readonly TextBlock _reserveSummary = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly CheckBox _useSms = new() { Content = "SMS 발송", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 12, 0, 0) };
+    private readonly CheckBox _useSms = new() { Content = "SMS 발송", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 6, 0, 0) };
 
     // 첨부 파일. 모든 대상에게 같은 파일을 붙인다. 파일은 복사하지 않고 경로만 들고 있다가, 발송 때 온톡의 파일 선택창으로 붙인다.
     private readonly List<string> _attachments = [];
     private readonly StackPanel _attachList = new();
-    private readonly TextBlock _attachSummary = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0) };
+    private readonly TextBlock _attachSummary = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0) };
 
     // 작업 / 하단 줄
     private readonly ComboBox _saved = new();
-    private readonly TextBlock _savedInfo = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 6, 0, 0) };
+    private readonly TextBlock _savedInfo = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 4, 0, 0) };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly ProgressBar _progress = new() { Height = 4, Minimum = 0, Maximum = 1, BorderThickness = new Thickness(0), Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 8) };
+    private readonly ProgressBar _progress = new() { Height = 3, Minimum = 0, Maximum = 1, BorderThickness = new Thickness(0), Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 5) };
     private readonly ScrollViewer _page = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly Button _batchSendButton;
     private readonly Button _stopBatchButton;
@@ -104,9 +104,9 @@ public sealed class PersonalizedPane : WorkPane
             Content = "되돌리기",
             Focusable = false,
             IsEnabled = false,
-            Padding = new Thickness(8, 2, 8, 2),
-            MinHeight = 24,
-            FontSize = 11.5,
+            Padding = new Thickness(6, 1, 6, 1),
+            MinHeight = 20,
+            FontSize = 10.5,
             ToolTip = "직전 AI 문장 변환 전 상태로 되돌립니다.",
         };
         _undoButton.Click += (_, _) => UndoAi();
@@ -125,7 +125,7 @@ public sealed class PersonalizedPane : WorkPane
         _singleSendButton = Btn("선택한 한 사람만 발송", OnSingleSendAsync);
         _batchSendButton = Btn("준비된 대상 자동 연속 발송", OnBatchSendAsync, style: "PrimaryButton");
 
-        var page = new StackPanel { Margin = new Thickness(20, 16, 20, 12) };
+        var page = new StackPanel { Margin = new Thickness(12, 10, 12, 6) };
         page.Children.Add(BuildHeader());
         page.Children.Add(BuildTemplateSection());
         page.Children.Add(BuildRecipientSection());
@@ -196,16 +196,16 @@ public sealed class PersonalizedPane : WorkPane
         _templateName.Tag = "서식 제목 (예: 교육 일정 안내)";
         _templates.ItemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse(TemplateItemTemplate);
         _templateName.MaxLength = 60;
-        _summary.Foreground = Res<Brush>("Muted"); _summary.FontSize = 12;
+        _summary.Foreground = Res<Brush>("Muted"); _summary.FontSize = 11;
         _selectedInfo.FontWeight = FontWeights.SemiBold;
-        _bodyInfo.Foreground = Res<Brush>("Muted"); _bodyInfo.FontSize = 12;
-        _savedInfo.Foreground = Res<Brush>("Muted"); _savedInfo.FontSize = 12;
-        _reserveSummary.Foreground = Res<Brush>("Muted"); _reserveSummary.FontSize = 12;
-        _reserveSummary.Margin = new Thickness(0, 8, 0, 0);
+        _bodyInfo.Foreground = Res<Brush>("Muted"); _bodyInfo.FontSize = 11;
+        _savedInfo.Foreground = Res<Brush>("Muted"); _savedInfo.FontSize = 11;
+        _reserveSummary.Foreground = Res<Brush>("Muted"); _reserveSummary.FontSize = 11;
+        _reserveSummary.Margin = new Thickness(0, 5, 0, 0);
         _status.Style = Res<Style>("StatusLine");
         _progress.Foreground = Res<Brush>("Accent"); _progress.Background = Res<Brush>("Line");
-        _grid.FontSize = 12.5; _grid.MinRowHeight = 30; _grid.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
-        _grid.RowHeight = 30; _grid.CanUserSortColumns = false; _grid.CanUserReorderColumns = false;
+        _grid.FontSize = 11.5; _grid.MinRowHeight = 24; _grid.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
+        _grid.RowHeight = 24; _grid.CanUserSortColumns = false; _grid.CanUserReorderColumns = false;
         _grid.AutomationName("개인별 대상자와 입력 데이터");
         _template.AutomationName("서식 내용"); _templateName.AutomationName("서식 제목"); _preview.AutomationName("선택한 사람의 본문");
 
@@ -214,7 +214,7 @@ public sealed class PersonalizedPane : WorkPane
         _interactiveControls.Add(_fieldChips);
         ForwardWheel(_grid); ForwardWheel(_template); ForwardWheel(_preview);
 
-        _saved.MinHeight = 46;
+        _saved.MinHeight = 34;
         _saved.ItemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse(SavedItemTemplate);
         _saved.AddHandler(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, new RoutedEventHandler(OnRemoveSavedClick));
         _templates.SelectionChanged += (_, _) => ApplySelectedTemplate();
@@ -243,28 +243,28 @@ public sealed class PersonalizedPane : WorkPane
 
     private const string SavedItemTemplate = """
         <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-          <Grid MinWidth="300">
+          <Grid MinWidth="220">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <StackPanel Margin="0,0,8,0" VerticalAlignment="Center">
+            <StackPanel Margin="0,0,6,0" VerticalAlignment="Center">
               <DockPanel LastChildFill="True">
-                <Border x:Name="DraftTag" DockPanel.Dock="Right" Margin="8,0,0,0" Padding="7,1" CornerRadius="9" VerticalAlignment="Center"
+                <Border x:Name="DraftTag" DockPanel.Dock="Right" Margin="6,0,0,0" Padding="6,0" CornerRadius="8" VerticalAlignment="Center"
                         Background="{DynamicResource AccentSoft}" Visibility="Collapsed">
-                  <TextBlock Text="임시 저장" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource AccentText}"/>
+                  <TextBlock Text="임시 저장" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentText}"/>
                 </Border>
-                <Border x:Name="SentTag" DockPanel.Dock="Right" Margin="8,0,0,0" Padding="7,1" CornerRadius="9" VerticalAlignment="Center"
+                <Border x:Name="SentTag" DockPanel.Dock="Right" Margin="6,0,0,0" Padding="6,0" CornerRadius="8" VerticalAlignment="Center"
                         Background="{DynamicResource SuccessSoft}" Visibility="Collapsed">
-                  <TextBlock Text="발송 완료" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Success}"/>
+                  <TextBlock Text="발송 완료" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource Success}"/>
                 </Border>
-                <Border x:Name="PartTag" DockPanel.Dock="Right" Margin="8,0,0,0" Padding="7,1" CornerRadius="9" VerticalAlignment="Center"
+                <Border x:Name="PartTag" DockPanel.Dock="Right" Margin="6,0,0,0" Padding="6,0" CornerRadius="8" VerticalAlignment="Center"
                         Background="{DynamicResource WarnSoft}" Visibility="Collapsed">
-                  <TextBlock Text="일부 발송" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Warn}"/>
+                  <TextBlock Text="일부 발송" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource Warn}"/>
                 </Border>
                 <TextBlock Text="{Binding Headline}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
               </DockPanel>
-              <TextBlock Text="{Binding Detail}" FontSize="11.5" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis"/>
+              <TextBlock Text="{Binding Detail}" FontSize="10.5" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis"/>
             </StackPanel>
             <Button x:Name="RemoveButton" Grid.Column="1" Style="{DynamicResource IconButton}" Content="&#xE711;" Tag="{Binding Id}"
-                    ToolTip="이 저장 작업 삭제" AutomationProperties.Name="저장 작업 삭제" Width="26" Height="26"/>
+                    ToolTip="이 저장 작업 삭제" AutomationProperties.Name="저장 작업 삭제" Width="22" Height="22"/>
           </Grid>
           <DataTemplate.Triggers>
             <DataTrigger Binding="{Binding IsDraft}" Value="True">
@@ -301,7 +301,7 @@ public sealed class PersonalizedPane : WorkPane
 
     private Button Btn(string title, RoutedEventHandler handler, bool track = true, string? style = null, string? tip = null)
     {
-        var button = new Button { Content = title, Margin = new Thickness(0, 0, 8, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        var button = new Button { Content = title, Margin = new Thickness(0, 0, 6, 0), HorizontalAlignment = HorizontalAlignment.Left };
         if (style is not null) button.Style = Res<Style>(style);
         if (tip is not null) button.ToolTip = tip;
         button.Click += handler;
@@ -326,7 +326,7 @@ public sealed class PersonalizedPane : WorkPane
 
     private static TextBlock FieldLabel(string text, bool top = false) => new()
     {
-        Text = text, FontWeight = FontWeights.SemiBold, FontSize = 12.5, Margin = new Thickness(0, top ? 8 : 0, 12, 0),
+        Text = text, FontWeight = FontWeights.SemiBold, FontSize = 11.5, Margin = new Thickness(0, top ? 5 : 0, 8, 0),
         VerticalAlignment = top ? VerticalAlignment.Top : VerticalAlignment.Center
     };
 
@@ -336,10 +336,10 @@ public sealed class PersonalizedPane : WorkPane
 
         // ‘저장한 작업’은 제목과 떼어 접고 펼 수 있는 따로의 구역으로 둔다.
         var toggleContent = new StackPanel { Orientation = Orientation.Horizontal };
-        _savedChevron.FontFamily = (FontFamily)FindResource("IconFont"); _savedChevron.FontSize = 11; _savedChevron.VerticalAlignment = VerticalAlignment.Center; _savedChevron.Margin = new Thickness(0, 0, 8, 0);
+        _savedChevron.FontFamily = (FontFamily)FindResource("IconFont"); _savedChevron.FontSize = 10; _savedChevron.VerticalAlignment = VerticalAlignment.Center; _savedChevron.Margin = new Thickness(0, 0, 6, 0);
         toggleContent.Children.Add(_savedChevron);
-        toggleContent.Children.Add(new TextBlock { Text = "저장한 작업", FontWeight = FontWeights.Bold, FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
-        _savedCount.Foreground = Res<Brush>("Muted"); _savedCount.FontSize = 12; _savedCount.VerticalAlignment = VerticalAlignment.Center; _savedCount.Margin = new Thickness(8, 0, 0, 0);
+        toggleContent.Children.Add(new TextBlock { Text = "저장한 작업", FontWeight = FontWeights.Bold, FontSize = 13, VerticalAlignment = VerticalAlignment.Center });
+        _savedCount.Foreground = Res<Brush>("Muted"); _savedCount.FontSize = 11; _savedCount.VerticalAlignment = VerticalAlignment.Center; _savedCount.Margin = new Thickness(6, 0, 0, 0);
         toggleContent.Children.Add(_savedCount);
         var toggle = new Button
         {
@@ -349,12 +349,12 @@ public sealed class PersonalizedPane : WorkPane
         toggle.AutomationName("저장한 작업 접기 또는 펼치기");
         toggle.Click += (_, _) => SetSavedExpanded(!_savedExpanded);
 
-        var saved = new Grid { Margin = new Thickness(0, 12, 0, 0) };
+        var saved = new Grid { Margin = new Thickness(0, 8, 0, 0) };
         saved.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         saved.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         saved.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         saved.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        _saved.Margin = new Thickness(0, 0, 8, 0); saved.Children.Add(_saved);
+        _saved.Margin = new Thickness(0, 0, 6, 0); saved.Children.Add(_saved);
         var load = SmallBtn("불러오기", (_, _) =>
         {
             if (_saved.SelectedItem is not PersonalizedWork work) { _status.Text = "불러올 저장 작업을 목록에서 먼저 고르세요."; return; }
@@ -369,7 +369,7 @@ public sealed class PersonalizedPane : WorkPane
             if (Dialogs.Show(Host, "저장한 개인화 작업과 입력 데이터·본문을 삭제할까요? 발송 기록은 유지됩니다.", "개인화 작업 삭제", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
             _store.DeletePersonalizedWork(_work.Id); StartFreshWork(); _status.Text = "저장한 작업을 삭제하고 새 작업으로 바꿨습니다.";
         }, "지금 열려 있는 작업을 저장소에서 지우고 서식과 입력 값이 빈 새 작업으로 바꿉니다.");
-        delete.Style = Res<Style>("DangerButton"); delete.MinHeight = 26; delete.Padding = new Thickness(10, 0, 10, 0); delete.FontSize = 12; delete.Margin = new Thickness(0);
+        delete.Style = Res<Style>("DangerButton"); delete.MinHeight = 22; delete.Padding = new Thickness(8, 0, 8, 0); delete.FontSize = 11; delete.Margin = new Thickness(0);
         var clean = SmallBtn("표시 없는 작업 정리", (_, _) => CleanUnmarkedWorks(),
             "‘임시 저장’ 표시도 발송 기록도 없는 저장 작업(이전 버전이 창을 닫을 때 자동 저장한 것 등)을 한꺼번에 지웁니다.");
         Grid.SetColumn(clean, 2); saved.Children.Add(clean);
@@ -378,7 +378,7 @@ public sealed class PersonalizedPane : WorkPane
         _savedBody.Children.Add(_savedInfo);
         var section = new StackPanel();
         section.Children.Add(toggle); section.Children.Add(_savedBody);
-        page.Children.Add(new Border { Style = Res<Style>("Card"), Padding = new Thickness(18, 12, 18, 12), Margin = new Thickness(0, 0, 0, 12), Child = section });
+        page.Children.Add(new Border { Style = Res<Style>("Card"), Padding = new Thickness(12, 8, 12, 8), Margin = new Thickness(0, 0, 0, 8), Child = section });
         return page;
     }
 
@@ -392,7 +392,7 @@ public sealed class PersonalizedPane : WorkPane
     private UIElement BuildTemplateSection()
     {
         var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(96) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         for (var i = 0; i < 5; i++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -400,25 +400,25 @@ public sealed class PersonalizedPane : WorkPane
         void Place(UIElement el, int row, int col, int span = 1, Thickness? margin = null)
         {
             Grid.SetRow(el, row); Grid.SetColumn(el, col); Grid.SetColumnSpan(el, span);
-            if (el is FrameworkElement fe) fe.Margin = margin ?? new Thickness(0, 0, 0, 8);
+            if (el is FrameworkElement fe) fe.Margin = margin ?? new Thickness(0, 0, 0, 5);
             grid.Children.Add(el);
         }
 
-        Place(FieldLabel("저장된 서식"), 0, 0, margin: new Thickness(0, 0, 12, 8));
-        Place(_templates, 0, 1, margin: new Thickness(0, 0, 8, 8));
+        Place(FieldLabel("저장된 서식"), 0, 0, margin: new Thickness(0, 0, 8, 5));
+        Place(_templates, 0, 1, margin: new Thickness(0, 0, 6, 5));
         var del = SmallBtn("서식 삭제", (_, _) => DeleteSelectedTemplate(), "고른 저장 서식을 목록에서 지웁니다. 진행 중인 작업의 서식 내용은 그대로입니다.");
-        Place(del, 0, 2, margin: new Thickness(0, 0, 0, 8));
+        Place(del, 0, 2, margin: new Thickness(0, 0, 0, 5));
 
-        Place(FieldLabel("서식 제목"), 1, 0, margin: new Thickness(0, 0, 12, 8));
-        Place(_templateName, 1, 1, margin: new Thickness(0, 0, 8, 8));
+        Place(FieldLabel("서식 제목"), 1, 0, margin: new Thickness(0, 0, 8, 5));
+        Place(_templateName, 1, 1, margin: new Thickness(0, 0, 6, 5));
         var save = SmallBtn("서식 저장", (_, _) => SaveTemplate(), "제목과 내용을 서식으로 저장합니다. 같은 제목이 있으면 내용을 바꿉니다.");
         save.Style = Res<Style>("SmallButton");
-        Place(save, 1, 2, margin: new Thickness(0, 0, 0, 8));
+        Place(save, 1, 2, margin: new Thickness(0, 0, 0, 5));
 
-        Place(FieldLabel("서식 내용", top: true), 2, 0, margin: new Thickness(0, 8, 12, 8));
+        Place(FieldLabel("서식 내용", top: true), 2, 0, margin: new Thickness(0, 5, 8, 5));
         Place(_template, 2, 1, 2);
 
-        Place(FieldLabel("변수 삽입", top: true), 3, 0, margin: new Thickness(0, 6, 12, 0));
+        Place(FieldLabel("변수 삽입", top: true), 3, 0, margin: new Thickness(0, 4, 8, 0));
         Place(_fieldChips, 3, 1, 2, new Thickness(0));
         Place(_templateCheck, 4, 1, 2, new Thickness(0, 2, 0, 0));
 
@@ -433,7 +433,7 @@ public sealed class PersonalizedPane : WorkPane
         files.Children.Add(SmallBtn("입력 양식 CSV 내보내기", (_, _) => ExportCsv(), "대상자의 이름·소속·직급과 서식 변수 열이 들어 있는 CSV를 저장합니다."));
         files.Children.Add(SmallBtn("CSV · TSV · XLSX 가져오기", (_, _) => ImportFile(), "열 이름(헤더)이 서식 변수와 같은 표 파일을 읽어 사람별 값을 채웁니다."));
         body.Children.Add(files);
-        _grid.Margin = new Thickness(0, 10, 0, 0);
+        _grid.Margin = new Thickness(0, 6, 0, 0);
         body.Children.Add(_grid);
         var help = TableHelpButton();
         var right = new StackPanel { Orientation = Orientation.Horizontal };
@@ -454,7 +454,7 @@ public sealed class PersonalizedPane : WorkPane
     private UIElement BuildBodySection()
     {
         var body = new StackPanel();
-        var info = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
+        var info = new DockPanel { Margin = new Thickness(0, 0, 0, 5) };
         DockPanel.SetDock(_bodyInfo, Dock.Right);
         info.Children.Add(_bodyInfo); info.Children.Add(_selectedInfo);
 
@@ -464,14 +464,14 @@ public sealed class PersonalizedPane : WorkPane
         left.Children.Add(_preview);
         var compare = new Grid();
         compare.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        compare.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(228) });
+        compare.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(178) });
         compare.Children.Add(left);
         var aiPanel = BuildAiPanel();
         Grid.SetColumn(aiPanel, 1);
         compare.Children.Add(aiPanel);
         body.Children.Add(compare);
 
-        var nav = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+        var nav = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
         nav.Children.Add(SmallBtn("◀ 이전 사람", (_, _) => MoveSelection(-1)));
         nav.Children.Add(SmallBtn("다음 사람 ▶", (_, _) => MoveSelection(1)));
         nav.Children.Add(SmallBtn("다음 미발송 대상 선택", (_, _) => SelectNextPending(), "본문이 준비되고 아직 발송을 시도하지 않은 다음 사람을 고릅니다."));
@@ -498,14 +498,14 @@ public sealed class PersonalizedPane : WorkPane
     {
         var stack = new StackPanel();
 
-        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
+        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 3) };
         DockPanel.SetDock(_undoButton, Dock.Right);
         header.Children.Add(_undoButton);
         header.Children.Add(new TextBlock
         {
             Text = "✦ AI 문장 다듬기",
             FontWeight = FontWeights.SemiBold,
-            FontSize = 12.5,
+            FontSize = 11,
             Foreground = Res<Brush>("AccentText"),
             VerticalAlignment = VerticalAlignment.Center,
         });
@@ -519,8 +519,9 @@ public sealed class PersonalizedPane : WorkPane
                 Content = preset.Label,
                 Style = Res<Style>("SmallButton"),
                 Focusable = false,
-                Margin = new Thickness(2),
-                MinHeight = 36,
+                Margin = new Thickness(1.5),
+                Padding = new Thickness(3, 0, 3, 0),
+                MinHeight = 26,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Center,
                 ToolTip = preset.Description,
@@ -535,12 +536,12 @@ public sealed class PersonalizedPane : WorkPane
 
         return new Border
         {
-            Margin = new Thickness(10, 0, 0, 0),
+            Margin = new Thickness(8, 0, 0, 0),
             Background = Res<Brush>("AccentSoft"),
             BorderBrush = (Brush)new BrushConverter().ConvertFromString("#CFDBFF")!,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(10),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(7),
             Child = stack,
         };
     }
@@ -613,13 +614,13 @@ public sealed class PersonalizedPane : WorkPane
         _attachList.Children.Clear();
         foreach (var path in _attachments.ToList())
         {
-            var row = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+            var row = new Grid { Margin = new Thickness(0, 3, 0, 0) };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var size = new System.IO.FileInfo(path) is { Exists: true } info ? NoteAttachments.Size(info.Length) : "파일 없음";
             row.Children.Add(new TextBlock { Text = "📎 " + System.IO.Path.GetFileName(path), ToolTip = path, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
-            var sizeText = new TextBlock { Text = size, Foreground = Res<Brush>("Muted"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 8, 0) };
+            var sizeText = new TextBlock { Text = size, Foreground = Res<Brush>("Muted"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 6, 0) };
             Grid.SetColumn(sizeText, 1); row.Children.Add(sizeText);
             var remove = new Button { Content = "✕", Style = Res<Style>("SmallButton"), ToolTip = "첨부에서 뺍니다(원본 파일은 그대로)." };
             remove.AutomationName("첨부 제거 " + System.IO.Path.GetFileName(path));
@@ -640,7 +641,7 @@ public sealed class PersonalizedPane : WorkPane
         var panel = new StackPanel { Orientation = Orientation.Horizontal };
         panel.Children.Add(_reserveDate);
         panel.Children.Add(_reserveHour);
-        panel.Children.Add(new TextBlock { Text = "시", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) });
+        panel.Children.Add(new TextBlock { Text = "시", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
         panel.Children.Add(_reserveMinute);
         panel.Children.Add(new TextBlock { Text = "분", VerticalAlignment = VerticalAlignment.Center });
         return panel;
@@ -648,17 +649,17 @@ public sealed class PersonalizedPane : WorkPane
 
     private UIElement BuildActionBar()
     {
-        var bar = new StackPanel { Margin = new Thickness(20, 10, 20, 12) };
+        var bar = new StackPanel { Margin = new Thickness(12, 7, 12, 8) };
         bar.Children.Add(_progress);
-        var statusScroll = new ScrollViewer { MaxHeight = 92, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 0, 0, 8), Content = _status };
+        var statusScroll = new ScrollViewer { MaxHeight = 60, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 0, 0, 5), Content = _status };
         bar.Children.Add(statusScroll);
 
         var buttons = new DockPanel();
         var right = new StackPanel { Orientation = Orientation.Horizontal };
         DockPanel.SetDock(right, Dock.Right);
-        _stopBatchButton.Margin = new Thickness(0, 0, 8, 0);
+        _stopBatchButton.Margin = new Thickness(0, 0, 6, 0);
         right.Children.Add(_stopBatchButton);
-        _singleSendButton.Margin = new Thickness(0, 0, 8, 0);
+        _singleSendButton.Margin = new Thickness(0, 0, 6, 0);
         right.Children.Add(_singleSendButton);
         _batchSendButton.Margin = new Thickness(0);
         right.Children.Add(_batchSendButton);
@@ -752,7 +753,7 @@ public sealed class PersonalizedPane : WorkPane
         _fieldChips.Children.Clear();
         foreach (var field in NotePersonalization.IdentityFields)
             _fieldChips.Children.Add(FieldChip(field, "서식 내용의 커서 위치에 넣습니다."));
-        _fieldChips.Children.Add(new Border { Width = 1, Height = 18, Background = Res<Brush>("Line"), Margin = new Thickness(4, 0, 10, 6) });
+        _fieldChips.Children.Add(new Border { Width = 1, Height = 14, Background = Res<Brush>("Line"), Margin = new Thickness(3, 0, 6, 4) });
         foreach (var field in _work.Headers)
         {
             var isMissing = missing.Contains(field);
@@ -777,7 +778,7 @@ public sealed class PersonalizedPane : WorkPane
 
     private Button FieldChip(string field, string tip)
     {
-        var chip = new Button { Content = "{" + field + "}", Style = Res<Style>("SmallButton"), Margin = new Thickness(0, 0, 6, 6), ToolTip = tip };
+        var chip = new Button { Content = "{" + field + "}", Style = Res<Style>("SmallButton"), Margin = new Thickness(0, 0, 4, 4), ToolTip = tip };
         chip.Click += (_, _) =>
         {
             var start = _template.SelectionStart; var text = "{" + field + "}";
@@ -1290,7 +1291,7 @@ public sealed class PersonalizedPane : WorkPane
     private void RebuildColumns()
     {
         _grid.Columns.Clear(); _headerCounters.Clear();
-        var identity = new[] { ("이름", "Name", 0.8, 76d), ("소속", "Organization", 2.2, 120d), ("직급", "Title", 1.6, 100d) };
+        var identity = new[] { ("이름", "Name", 1.4, 88d), ("소속", "Organization", 2.0, 84d), ("직급", "Title", 1.2, 62d) };
         foreach (var (title, property, weight, min) in identity)
             _grid.Columns.Add(new DataGridTextColumn
             {
@@ -1298,12 +1299,12 @@ public sealed class PersonalizedPane : WorkPane
                 Width = new DataGridLength(weight, DataGridLengthUnitType.Star), MinWidth = min, ElementStyle = Trim(),
             });
         var editBox = new Style(typeof(TextBox), Res<Style>("FieldBox"));
-        editBox.Setters.Add(new Setter(Control.MinHeightProperty, 26d));
-        editBox.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(6, 0, 6, 0)));
+        editBox.Setters.Add(new Setter(Control.MinHeightProperty, 22d));
+        editBox.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(5, 0, 5, 0)));
         foreach (var header in _work.Headers)
             _grid.Columns.Add(new DataGridTemplateColumn
             {
-                Header = HeaderCell(header), IsReadOnly = false, Width = new DataGridLength(1.5, DataGridLengthUnitType.Star), MinWidth = 190,
+                Header = HeaderCell(header), IsReadOnly = false, Width = new DataGridLength(1.8, DataGridLengthUnitType.Star), MinWidth = 130,
                 CellStyle = ItemCellStyle(header), CellTemplate = ItemCellTemplate(header), CellEditingTemplate = ItemEditTemplate(header, editBox),
             });
         // 처리 상태 열은 따로 두지 않는다. 준비 상태는 항목 칸의 아이콘으로, 자세한 처리 상태는 줄에 올린 풍선 도움말과 ③에 보인다.
@@ -1374,16 +1375,16 @@ public sealed class PersonalizedPane : WorkPane
     {
         Button Tool(string glyph, string tip, Action act)
         {
-            var button = new Button { Content = glyph, Style = Res<Style>("IconButton"), Width = 22, Height = 22, FontSize = 11, Margin = new Thickness(2, 0, 0, 0), ToolTip = tip };
+            var button = new Button { Content = glyph, Style = Res<Style>("IconButton"), Width = 18, Height = 18, FontSize = 10, Margin = new Thickness(1, 0, 0, 0), ToolTip = tip };
             button.AutomationName(tip + " " + header);
             button.Click += (_, e) => { e.Handled = true; act(); };
             return button;
         }
         var panel = new StackPanel { Orientation = Orientation.Horizontal };
-        panel.Children.Add(new TextBlock { Text = header, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 110, ToolTip = header });
-        var count = new TextBlock { FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
-        var bar = new ProgressBar { Width = 28, Height = 4, Minimum = 0, Maximum = 1, BorderThickness = new Thickness(0), Margin = new Thickness(5, 0, 0, 0), Background = Res<Brush>("Line"), VerticalAlignment = VerticalAlignment.Center };
-        var chip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 0, 2, 0), ToolTip = "값이 입력된 사람 수 / 전체 대상자 수" };
+        panel.Children.Add(new TextBlock { Text = header, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 80, ToolTip = header });
+        var count = new TextBlock { FontSize = 10, VerticalAlignment = VerticalAlignment.Center };
+        var bar = new ProgressBar { Width = 22, Height = 3, Minimum = 0, Maximum = 1, BorderThickness = new Thickness(0), Margin = new Thickness(4, 0, 0, 0), Background = Res<Brush>("Line"), VerticalAlignment = VerticalAlignment.Center };
+        var chip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(5, 0, 2, 0), ToolTip = "값이 입력된 사람 수 / 전체 대상자 수" };
         chip.Children.Add(count); chip.Children.Add(bar);
         panel.Children.Add(chip);
         _headerCounters[header] = (count, bar);
