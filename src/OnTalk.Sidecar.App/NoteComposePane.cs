@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Media.Animation;
 using System.Windows.Media;
 using System.Windows.Threading;
 using OnTalk.Sidecar.AI;
@@ -30,18 +31,14 @@ public sealed class NoteComposePane : UserControl, IDisposable
     private readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromMilliseconds(800) };
     private readonly TextBox _editor = new() { MinHeight = 145, IsInactiveSelectionHighlightEnabled = true };
     private readonly TextBox _instruction = new();
-    private readonly TextBox _proposal = new() { IsReadOnly = true, MinHeight = 110, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-    private readonly StackPanel _review = new() { Visibility = Visibility.Collapsed };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly TextBlock _target = new() { TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock _bytes = new();
     private readonly CheckBox _includeQuote = new() { IsChecked = true };
     private readonly CheckBox _useRecent = new() { IsChecked = true, Content = "최근 쪽지·대화를 AI 참고에 포함", Visibility = Visibility.Collapsed };
-    private readonly Button _generate = new() { Content = "AI로 제안" };
-    private readonly Button _accept = new() { Content = "제안을 초안에 적용" };
+    private readonly Button _generate = new();
     private readonly Button _undo = new() { Content = "되돌리기", IsEnabled = false };
-    private readonly Button _apply = new() { Content = "현재 온톡 창에 반영" };
-    private readonly Button _reload = new() { Content = "온톡의 최신 글 가져오기" };
+    private readonly Button _apply = new();
+    private readonly Button _reload = new();
     private readonly ComboBox _templates = new() { Margin = new Thickness(0, 0, 6, 5) };
     private readonly TextBox _templateName = new() { MaxLength = 60, Margin = new Thickness(0, 0, 6, 5) };
     private readonly List<Button> _aiButtons = [];
@@ -56,9 +53,9 @@ public sealed class NoteComposePane : UserControl, IDisposable
     private string _expectedBody;
     private string _quote;
     private long _revision;
-    private DraftRevision _proposedRevision;
     private bool _applyingTemplate;
     private bool _busy;
+    private Button? _working;
     private bool _disposed;
     private bool _active;
 
@@ -74,37 +71,49 @@ public sealed class NoteComposePane : UserControl, IDisposable
         StyleControls();
 
         var body = new StackPanel { Margin = new Thickness(12) };
-        body.Children.Add(Label(SidecarPolicy.ComposePurpose(kind), "Body"));
-        body.Children.Add(_target);
 
-        // 본문 · 저장된 서식
-        body.Children.Add(Label("현재 초안", "SectionTitle"));
-        body.Children.Add(BuildTemplateGrid());
+        // 작성 도우미 패널: 저장된 서식 · AI 문장 다듬기 · 요청문 AI 제안 · 온톡 창 주고받기를 하나로 묶어 접고 펼 수 있게 한다.
+        var helper = new StackPanel();
+        helper.Children.Add(BuildTemplateRow());
+        helper.Children.Add(BuildAiPanel());
+
+        _instruction.ToolTip = "생성·에디팅 요청. 예: 제출 방법을 문의하는 답장 / 현재 글을 간결하고 정중하게";
+        _instruction.Tag = "생성·에디팅 요청";
+        _instruction.Margin = new Thickness(0, 0, 6, 0);
+        // 요청 입력칸과 세 단추(AI 제안 · 온톡 창에 반영 · 온톡의 최신 글 가져오기)를 한 줄에 둔다. 단추는 그림만 쓴다.
+        var requestRow = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+        requestRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        requestRow.Children.Add(_instruction);
+        var icons = new (Button Button, string Glyph, string Name, string Tip)[]
+        {
+            (_generate, "✦", "AI로 제안", "AI로 제안: 요청대로 AI가 글을 만들어 초안 칸에 바로 넣습니다. 되돌리기로 복원할 수 있습니다."),
+            (_apply, "", "현재 온톡 창에 반영", "현재 온톡 창에 반영: 이 초안을 온톡 쪽지창 본문에 넣습니다. 전송은 하지 않습니다."),
+            (_reload, "", "온톡의 최신 글 가져오기", "온톡의 최신 글 가져오기: 온톡 쪽지창에 적힌 본문을 초안 칸으로 가져옵니다."),
+        };
+        for (var n = 0; n < icons.Length; n++)
+        {
+            requestRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            StyleIconButton(icons[n].Button, icons[n].Glyph, icons[n].Name, icons[n].Tip);
+            Grid.SetColumn(icons[n].Button, n + 1);
+            requestRow.Children.Add(icons[n].Button);
+        }
+        helper.Children.Add(requestRow);
+        _useRecent.Margin = new Thickness(0, 6, 0, 0);
+        helper.Children.Add(_useRecent);
+        body.Children.Add(WorkUi.Section(this, null, "작성 도우미", "", helper));
+
+        // 접어 두어도 결과·오류 안내는 보이도록 패널 밖에 둔다. 비어 있으면 자리를 차지하지 않는다.
+        var statusStyle = new Style(typeof(TextBlock));
+        statusStyle.Setters.Add(new Setter(MarginProperty, new Thickness(0, 0, 0, 8)));
+        var emptyStatus = new Trigger { Property = TextBlock.TextProperty, Value = "" };
+        emptyStatus.Setters.Add(new Setter(VisibilityProperty, Visibility.Collapsed));
+        statusStyle.Triggers.Add(emptyStatus);
+        _status.Style = statusStyle;
+        body.Children.Add(_status);
+
         body.Children.Add(_editor);
         body.Children.Add(_includeQuote);
         body.Children.Add(_bytes);
-
-        // AI 문장 다듬기: 블럭 지정한 구간만, 없으면 전체
-        body.Children.Add(BuildAiPanel());
-
-        // 요청문으로 새로 쓰거나 고치기
-        body.Children.Add(Label("생성·에디팅 요청", "SectionTitle"));
-        _instruction.ToolTip = "예: 제출 방법을 문의하는 답장 / 현재 글을 간결하고 정중하게";
-        body.Children.Add(_instruction);
-        _useRecent.Margin = new Thickness(0, 6, 0, 0);
-        body.Children.Add(_useRecent);
-        body.Children.Add(_generate);
-        _generate.Margin = new Thickness(0, 8, 0, 0);
-        _review.Children.Add(Label("제안된 글 · 수락 전에는 현재 글을 바꾸지 않습니다", "Small"));
-        _review.Children.Add(_proposal);
-        _review.Children.Add(_accept);
-        body.Children.Add(_review);
-
-        // 온톡 창에 반영
-        body.Children.Add(_apply);
-        body.Children.Add(_reload);
-        body.Children.Add(_status);
-        body.Children.Add(Label("전송·예약·보관 초안 불러오기는 머리줄의 작성 도우미 버튼에서 사용할 수 있습니다. 수신자·첨부·예약·SMS는 온톡에서 확인하세요.", "Caption"));
 
         // 받는 사람과 최근 오간 쪽지·대화
         body.Children.Add(Label("받는 사람과 최근 쪽지·대화", "SectionTitle"));
@@ -113,18 +122,17 @@ public sealed class NoteComposePane : UserControl, IDisposable
         body.Children.Add(_recentList);
 
         Content = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        foreach (var element in new FrameworkElement[] { _target, _bytes, _status, _includeQuote, _apply, _reload, _accept }) element.Margin = new Thickness(0, 8, 0, 0);
-        _editor.TextChanged += (_, _) => { _revision++; _accept.IsEnabled = false; UpdateBytes(); UpdateAiScope(); _autosave.Stop(); if (!_disposed) _autosave.Start(); };
+        foreach (var element in new FrameworkElement[] { _bytes, _includeQuote }) element.Margin = new Thickness(0, 8, 0, 0);
+        _editor.TextChanged += (_, _) => { _revision++; UpdateBytes(); UpdateAiScope(); _autosave.Stop(); if (!_disposed) _autosave.Start(); };
         _editor.SelectionChanged += (_, _) => UpdateAiScope();
-        _includeQuote.Click += (_, _) => { _revision++; _accept.IsEnabled = false; UpdateBytes(); };
+        _includeQuote.Click += (_, _) => { _revision++; UpdateBytes(); };
         _autosave.Tick += (_, _) => Save();
         _generate.Click += async (_, _) => await Suggest();
-        _accept.Click += (_, _) => Accept();
         _undo.Click += (_, _) =>
         {
             if (_history.TryPop(out var previous))
             {
-                _revision++; _accept.IsEnabled = false;
+                _revision++;
                 _quote = previous.Quote; _includeQuote.IsChecked = previous.IncludeQuote; _editor.Text = previous.Message;
                 Refresh(_state); UpdateBytes();
             }
@@ -148,7 +156,7 @@ public sealed class NoteComposePane : UserControl, IDisposable
     public void RestoreDraft(string draft, string? quote = null, bool? includeQuote = null)
     {
         if (_disposed) return;
-        _revision++; _accept.IsEnabled = false;
+        _revision++;
         Remember();
         if (quote is not null) _quote = quote;
         if (includeQuote is not null) _includeQuote.IsChecked = includeQuote;
@@ -157,7 +165,7 @@ public sealed class NoteComposePane : UserControl, IDisposable
 
     public void SetActive(bool active)
     {
-        if (_active != active) { _revision++; _accept.IsEnabled = false; }
+        if (_active != active) { _revision++; }
         _active = active;
         Enable();
     }
@@ -165,8 +173,6 @@ public sealed class NoteComposePane : UserControl, IDisposable
     public void Refresh(ComposeState state)
     {
         _state = state;
-        _target.Text = $"수신 {state.Recipients.Count}명: {string.Join(", ", state.Recipients)}" +
-            (state.Reservation is { } time ? $" · 예약 {time:MM-dd HH:mm}" : " · 즉시 전송") + (state.SmsChecked ? " · SMS 선택됨" : "");
         _includeQuote.Content = $"원문 인용 포함 ({NoteBytes.Count(_quote)} Bytes)";
         _includeQuote.Visibility = _quote.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (state.Body != _expectedBody && !_busy) _status.Text = "온톡의 본문이 바뀌었습니다. 최신 글을 가져오거나 내용을 비교한 뒤 반영하세요.";
@@ -193,31 +199,43 @@ public sealed class NoteComposePane : UserControl, IDisposable
         _aiScope.Foreground = (Brush)FindResource("Muted");
     }
 
-    private Grid BuildTemplateGrid()
+    /// <summary>글자 없이 그림만 쓰는 단추. 뜻은 마우스를 올렸을 때 나오는 설명과 화면 읽기용 이름으로 알린다.</summary>
+    private void StyleIconButton(Button button, string glyph, string name, string tip)
+    {
+        button.Style = (Style)FindResource("SmallButton");
+        button.Content = glyph;
+        button.FontFamily = glyph == "✦" ? new FontFamily("Segoe UI Symbol") : (FontFamily)FindResource("IconFont");
+        button.FontSize = 15;
+        button.Width = 38; button.Height = 32;
+        button.Padding = new Thickness(0);
+        button.ToolTip = tip;
+        button.AutomationName(name);
+        if (button.Margin == default) button.Margin = new Thickness(6, 0, 0, 0);
+    }
+
+    /// <summary>저장된 서식 선택·삭제와 서식 제목·저장을 한 줄에 둔다.</summary>
+    private Grid BuildTemplateRow()
     {
         var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(62) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        for (var i = 0; i < 2; i++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        void Place(UIElement element, int row, int column)
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Button Small(string glyph, string name, RoutedEventHandler handler, string tip, Thickness margin)
         {
-            Grid.SetRow(element, row); Grid.SetColumn(element, column);
-            grid.Children.Add(element);
-        }
-        TextBlock Caption(string text) => new() { Text = text, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 5) };
-        Button Small(string text, RoutedEventHandler handler, string tip)
-        {
-            var button = new Button { Content = text, Style = (Style)FindResource("SmallButton"), ToolTip = tip, Margin = new Thickness(0, 0, 0, 5) };
+            var button = new Button { Margin = margin };
+            StyleIconButton(button, glyph, name, tip);
             button.Click += handler;
             return button;
         }
-        Place(Caption("저장된 서식"), 0, 0);
-        Place(_templates, 0, 1);
-        Place(Small("서식 삭제", (_, _) => DeleteSelectedTemplate(), "고른 저장 서식을 목록에서 지웁니다."), 0, 2);
-        Place(Caption("서식 제목"), 1, 0);
-        Place(_templateName, 1, 1);
-        Place(Small("서식 저장", (_, _) => SaveTemplate(), "지금 내용을 이 제목의 서식으로 저장합니다. 같은 제목이 있으면 바꿉니다."), 1, 2);
+        _templates.ToolTip = "저장된 서식을 고르면 초안을 그 서식으로 바꿉니다.";
+        _templateName.ToolTip = "서식으로 저장할 제목";
+        _templates.Margin = new Thickness(0, 0, 6, 8);
+        _templateName.Margin = new Thickness(0, 0, 6, 8);
+        var delete = Small("", "서식 삭제", (_, _) => DeleteSelectedTemplate(), "서식 삭제: 고른 저장 서식을 목록에서 지웁니다.", new Thickness(0, 0, 4, 8));
+        var save = Small("", "서식 저장", (_, _) => SaveTemplate(), "서식 저장: 지금 내용을 이 제목의 서식으로 저장합니다. 같은 제목이 있으면 바꿉니다.", new Thickness(0, 0, 0, 8));
+        Grid.SetColumn(_templates, 0); Grid.SetColumn(_templateName, 1); Grid.SetColumn(delete, 2); Grid.SetColumn(save, 3);
+        grid.Children.Add(_templates); grid.Children.Add(_templateName); grid.Children.Add(delete); grid.Children.Add(save);
         return grid;
     }
 
@@ -246,7 +264,7 @@ public sealed class NoteComposePane : UserControl, IDisposable
                 HorizontalContentAlignment = HorizontalAlignment.Center, ToolTip = preset.Description,
             };
             button.AutomationName("AI " + preset.Label);
-            button.Click += async (_, _) => await Refine(preset);
+            button.Click += async (_, _) => await Refine(preset, button);
             _aiButtons.Add(button);
             grid.Children.Add(button);
         }
@@ -254,7 +272,7 @@ public sealed class NoteComposePane : UserControl, IDisposable
         stack.Children.Add(_aiScope);
         return new Border
         {
-            Margin = new Thickness(0, 10, 0, 0), Background = (Brush)FindResource("AccentSoft"),
+            Margin = new Thickness(0), Background = (Brush)FindResource("AccentSoft"),
             BorderBrush = (Brush)new BrushConverter().ConvertFromString("#CFDBFF")!, BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8), Padding = new Thickness(7), Child = stack,
         };
@@ -267,9 +285,26 @@ public sealed class NoteComposePane : UserControl, IDisposable
         var ready = _active && !_disposed && !_busy && !_state.DialogOpen;
         _apply.IsEnabled = ready;
         _reload.IsEnabled = ready;
-        _generate.IsEnabled = ready;
-        foreach (var button in _aiButtons) button.IsEnabled = ready;
-        _accept.IsEnabled = ready && _review.Visibility == Visibility.Visible && _proposedRevision.Matches(Revision);
+        _generate.IsEnabled = ready || ReferenceEquals(_generate, _working);
+        // 생성 중인 AI 단추는 깜박이는 모습이 흐려 보이지 않도록 켜 둔다. 다시 눌러도 _busy 검사로 막힌다.
+        foreach (var button in _aiButtons) button.IsEnabled = ready || ReferenceEquals(button, _working);
+    }
+
+    /// <summary>AI가 글을 만드는 동안 그 단추를 옅게 깜박여 진행 중임을 알린다. 안내 문구는 쓰지 않는다.</summary>
+    private void StartWorking(Button button)
+    {
+        StopWorking();
+        _working = button;
+        button.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.45, TimeSpan.FromMilliseconds(750))
+        {
+            AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = new SineEase(),
+        });
+    }
+
+    private void StopWorking()
+    {
+        _working?.BeginAnimation(OpacityProperty, null);
+        _working = null;
     }
 
     private void Remember() { _history.Push((_editor.Text, _quote, _includeQuote.IsChecked == true)); _undo.IsEnabled = true; }
@@ -318,7 +353,7 @@ public sealed class NoteComposePane : UserControl, IDisposable
         var text = chosen.Body;
         var variables = NotePersonalization.ExtractVariables(text);
         foreach (var variable in variables) text = NotePersonalization.RemoveVariable(text, variable);
-        _revision++; _accept.IsEnabled = false;
+        _revision++;
         Remember();
         _templateName.Text = chosen.Name;
         _editor.Text = text;
@@ -352,7 +387,7 @@ public sealed class NoteComposePane : UserControl, IDisposable
     // ───────────────────────── AI ─────────────────────────
 
     /// <summary>블럭 지정한 구간만, 없으면 전체 초안을 선택한 방식으로 다듬어 바로 적용한다. 되돌리기로 복원할 수 있다.</summary>
-    private async Task Refine(AiRefinePreset preset)
+    private async Task Refine(AiRefinePreset preset, Button worker)
     {
         if (!_active || _disposed || _busy) return;
         var snapshot = _editor.Text;
@@ -361,10 +396,9 @@ public sealed class NoteComposePane : UserControl, IDisposable
         var selectionLength = _editor.SelectionLength;
         var isBlock = DraftText.TryTrimSelection(snapshot, selectionStart, selectionLength, out _, out var blockLength, out var block);
         var before = Revision;
-        _busy = true; Enable();
-        _status.Text = isBlock
-            ? $"로컬 AI가 선택한 구간({blockLength}자)을 ‘{preset.Label}’ 방식으로 다듬는 중입니다."
-            : $"로컬 AI가 전체 초안을 ‘{preset.Label}’ 방식으로 다듬는 중입니다.";
+        _busy = true; _status.Text = "";
+        StartWorking(worker);
+        Enable();
         try
         {
             var refined = await _writer.RefineAsync(snapshot, isBlock ? block : null, preset.Instruction, _closing.Token);
@@ -376,7 +410,7 @@ public sealed class NoteComposePane : UserControl, IDisposable
             }
             if (string.IsNullOrWhiteSpace(refined)) { _status.Text = "AI로부터 빈 응답을 받아 초안을 유지했습니다."; return; }
             var applied = DraftText.ApplyRefinement(snapshot, selectionStart, selectionLength, refined);
-            _revision++; _accept.IsEnabled = false;
+            _revision++;
             Remember();
             _editor.Text = applied.Text;
             _editor.Focus();
@@ -394,15 +428,18 @@ public sealed class NoteComposePane : UserControl, IDisposable
         catch (OperationCanceledException) { }
         catch (AnalysisUnavailableException ex) { if (!_disposed) _status.Text = ex.Message; }
         catch (Exception ex) { if (!_disposed) _status.Text = $"다듬지 못했습니다. {ex.Message}"; }
-        finally { _busy = false; Enable(); }
+        finally { _busy = false; StopWorking(); Enable(); }
     }
 
     private async Task Suggest()
     {
+        if (!_active || _disposed || _busy) return;
         if (_instruction.Text.Trim().Length == 0) { _status.Text = "작성하거나 고칠 내용을 요청 칸에 적어 주세요."; return; }
         var before = Revision;
         var recent = _useRecent.IsChecked == true && _recent.Count > 0 ? RecentForAi() : "";
-        _busy = true; Enable(); _status.Text = "로컬 AI가 제안을 만드는 중입니다.";
+        _busy = true; _status.Text = "";
+        StartWorking(_generate);
+        Enable();
         try
         {
             var text = await _writer.SuggestAsync(_kind, _editor.Text, _quote, _instruction.Text.Trim(), _closing.Token, recent);
@@ -412,19 +449,15 @@ public sealed class NoteComposePane : UserControl, IDisposable
                 _status.Text = "초안이나 작업이 바뀌어 이전 요청의 제안을 적용하지 않았습니다. 필요하면 다시 요청하세요.";
                 return;
             }
-            _proposal.Text = text; _proposedRevision = before; _review.Visibility = Visibility.Visible; _accept.IsEnabled = true;
-            _status.Text = "현재 초안과 제안을 비교해 필요한 경우 수락하세요. 사실·날짜·약속을 확인하세요.";
+            Remember();
+            _editor.Text = text;
+            _editor.Focus(); _editor.CaretIndex = _editor.Text.Length;
+            _status.Text = "AI 제안을 초안에 넣었습니다. 사실·날짜·약속을 확인하고, 마음에 들지 않으면 ‘되돌리기’를 누르세요.";
         }
         catch (OperationCanceledException) { }
         catch (AnalysisUnavailableException ex) { if (!_disposed) _status.Text = ex.Message; }
         catch (Exception ex) { if (!_disposed) _status.Text = $"제안을 만들지 못했습니다. {ex.Message}"; }
-        finally { _busy = false; Enable(); }
-    }
-
-    private void Accept()
-    {
-        if (!_active || !_proposedRevision.Matches(Revision)) { _status.Text = "초안이나 작업이 바뀌어 이 제안을 적용하지 않았습니다."; return; }
-        Remember(); _editor.Text = _proposal.Text; _review.Visibility = Visibility.Collapsed;
+        finally { _busy = false; StopWorking(); Enable(); }
     }
 
     // ───────────────────────── 최근 쪽지·대화 ─────────────────────────
@@ -530,7 +563,7 @@ public sealed class NoteComposePane : UserControl, IDisposable
         if (_editor.Text.Length > 0 && Dialogs.Show(Window.GetWindow(this), "현재 초안을 온톡의 최신 글로 바꿀까요? 되돌리기로 복원할 수 있습니다.",
                 "최신 글 가져오기", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
         // 최신 스냅샷의 값은 반영 시 다시 읽어 비교한다.
-        _revision++; _accept.IsEnabled = false;
+        _revision++;
         Remember(); _expectedBody = _state.Body; var parts = DraftText.SplitQuote(_state.Body); _quote = parts.Quote; _editor.Text = parts.Message;
         Refresh(_state); UpdateBytes(); _status.Text = "온톡의 글을 가져왔습니다.";
     }
@@ -556,12 +589,12 @@ public sealed class NoteComposePane : UserControl, IDisposable
                 : $"반영하지 못했습니다 ({result.Status}). 온톡 창을 확인하세요.";
         }
         catch (Exception ex) { if (!_disposed) _status.Text = $"반영을 확인하지 못했습니다. 온톡 창을 확인하세요. {ex.Message}"; }
-        finally { _busy = false; Enable(); }
+        finally { _busy = false; StopWorking(); Enable(); }
     }
 
     public void Dispose()
     {
         if (_disposed) return;
-        Save(); _disposed = true; _active = false; _closing.Cancel(); _autosave.Stop();
+        StopWorking(); Save(); _disposed = true; _active = false; _closing.Cancel(); _autosave.Stop();
     }
 }
