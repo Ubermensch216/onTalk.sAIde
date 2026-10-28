@@ -76,6 +76,18 @@ public sealed partial class ProfileStore
         return result;
     }
 
+    /// <summary>보낸 사람 이름이 일치하는 보관 쪽지를 최신순으로 돌려준다.</summary>
+    public List<StoredNote> GetNotesFromSenders(IReadOnlyList<string> names, int limit = 10)
+    {
+        var distinct = names.Where(n => n.Length > 0).Distinct().ToList();
+        if (distinct.Count == 0) return [];
+        var args = distinct.Select((name, i) => ("$name" + i, (object?)name)).ToList();
+        args.Add(("$limit", limit));
+        using var cmd = Command($"SELECT {NoteColumns} FROM note n WHERE n.sender_name IN ({string.Join(',', distinct.Select((_, i) => "$name" + i))}) " +
+            "ORDER BY COALESCE(n.sent_at, n.first_seen_at) DESC LIMIT $limit", [.. args]);
+        return ReadNotes(cmd);
+    }
+
     public HomeDashboard GetHomeDashboard(IReadOnlyList<ContactPerson> people, DateTimeOffset now, int? days)
     {
         if (people.Count == 0) return HomeDashboard.Build(people, [], [], [], [], new Dictionary<long, ChatTaskSource>(), now, days);
