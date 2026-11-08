@@ -35,6 +35,10 @@ internal static class Program
         if (Directory.Exists(profileDir)) Directory.Delete(profileDir, true);
         using var store = ProfileStore.Open(profileDir, "preview");
         store.SaveGroup("예시 업무 그룹", [new Recipient("예시 담당자", "주무관", ["예시기관 총무팀"]) ]);
+        store.SaveTemplate("업무 협조 요청", "안녕하세요. 아래 업무 관련하여 협조 요청드립니다.\n\n- 요청 사항: \n- 회신 기한: \n\n감사합니다.");
+        store.SaveReceived(new ReceivedNote("예시 수신자", "총무팀", "어제 오후 03:20", null, 1, "요청하신 점검 서식을 전달해 드립니다. 확인 부탁드립니다.", []), DateTimeOffset.Now.AddDays(-1));
+        var prevSent = store.BeginDispatch(["예시 수신자"], "서식 잘 받았습니다. 작성 후 오늘 중으로 회신드리겠습니다.", null, DateTimeOffset.Now.AddHours(-3));
+        store.FinishDispatch(prevSent, DispatchStatus.WindowClosed, "");
         var panel = new PanelWindow();
         Set(panel, "_store", store);
         var session = Guid.NewGuid(); var hwnd = new IntPtr(123);
@@ -189,6 +193,7 @@ internal static class Program
             new HotkeyRegistration(() => IntPtr.Zero, new AppSettings()));
         if (((TextBox)Get(manage, "HotkeyBox")).Text != "Ctrl+Shift+Space (사용 중이 아님)") throw new InvalidOperationException("관리 창 단축키 표시 오류");
         Render((FrameworkElement)manage.Content, Path.Combine(output, "manage-hotkey.png"), 600, 1000);
+        ((TextBox)Get(host.Note!, "_editor")).Text = "안녕하세요. 10월 정기 점검 일정을 안내드립니다.\n\n- 일시: 10월 22일(수) 14:00\n- 장소: 3층 회의실\n\n참석 여부를 회신해 주세요.";
         Render(hostTabs, Path.Combine(output, "note-host-note.png"), clientWidth, clientHeight);
         Render(hostTabs, Path.Combine(output, "note-host-note-min.png"), 648, 456);
         hostTabs.SelectedIndex = 1;

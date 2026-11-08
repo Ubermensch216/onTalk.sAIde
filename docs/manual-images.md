@@ -1,10 +1,10 @@
 # 사용자 매뉴얼 이미지 제작 기록
 
-갱신: 2026-10-17. [사용자 매뉴얼](../README.md)의 이미지 출처와 개인정보 처리 기준이다.
+갱신: 2026-10-28. [사용자 매뉴얼](../README.md)의 이미지 출처와 개인정보 처리 기준이다.
 
 ## 새 Home 화면
 
-`images/home-dashboard.png`는 `OnTalk.ContextPreview`가 가상 친구·쪽지·대화로 렌더링한 실제 WPF 패널이다. 온톡 창·사용자 이력·첨부의 직원 정보를 사용하지 않았으며 상태 표시에도 가상 자료임을 명시했다. 상단 '체크한 친구와 함께(단체 대화/단체 쪽지)' 빠른 실행 및 3개 카드(최근 쪽지·최근 대화·최근 업무) 개편 화면을 반영했다. 이전 `friends-main.png`는 연락 준비 중심의 과거 Home 화면 기록으로 유지한다.
+`images/home-dashboard.png`는 `OnTalk.ContextPreview`가 가상 친구·쪽지·대화로 렌더링한 실제 WPF 패널이다. 온톡 창·사용자 이력·첨부의 직원 정보를 사용하지 않았으며 상태 표시에도 가상 자료임을 명시했다. 상단 '체크한 친구와 함께(단체 대화/단체 쪽지)' 빠른 실행 및 3개 카드(최근 쪽지·최근 대화·최근 업무)와 온톡 대화 목록에서 이름이 일치한 대화방(스키마 11 `HomeConversations`) 개편 화면을 반영했다. 이전 `friends-main.png`는 연락 준비 중심의 과거 Home 화면 기록으로 유지한다.
 
 ## 실제 메인 메뉴 화면
 
@@ -31,13 +31,16 @@
 | 파일 | 가상 자료 화면과 주의점 |
 |---|---|
 | images/note-reading.png | 받은 쪽지 읽기 지원. 실제는 별도 상세창에 부착 |
-| images/note-writing.png | 새 쪽지 작성 지원. 실제는 별도 작성창에 부착 |
+| images/note-writing.png | 새 쪽지 작성 지원. 서식 관리, 6개 프리셋 AI 문장 다듬기(블럭/전체 변환·되돌리기), 요청문 제안, 온톡 반영()/가져오기(), 수신자와 최근 오간 쪽지(수신/발신) 및 대화 3건 카드(펼침/접기) 및 AI 맥락 반영 확인란이 포함된 개편 화면 |
 | images/chat-support.png | 대화 원문 선택·답변 복사. 실제는 별도 대화창에 부착 |
-| images/group-note.png | 조직도 선택 직원에게 같은 쪽지 (받는 사람 칩·서식·본문·예약·자동 발송/준비) |
-| images/prepared-contact-compose.png | (이전) 조직도 선택 직원 대상 쪽지 작성 도우미. 현재는 `group-note.png` 창으로 바뀜 |
-| images/personalized-notes.png | 개인별 쪽지 작성과 미리보기 창 (서식·사용자정의 헤더/표·치환 미리보기·예약) |
-| images/personalized-notes-full.png | 개인별 쪽지 전체 작업 카드 (저장 작업·서식·데이터·본문 확인·발송 방식·연속 발송) |
+| images/note-host-note.png | 통합 쪽지 창의 ‘쪽지’ 탭 (조직도 선택 직원에게 같은 내용 발송, 받는 사람 칩·서식·첨부·예약·SMS·임시저장) |
+| images/note-host-personalized.png | 통합 쪽지 창의 ‘개인별 쪽지’ 탭 (서식·CSV/XLSX 대상 데이터·치환 미리보기·자동 연속 발송) |
+| images/group-note.png | 조직도 선택 직원에게 같은 쪽지 (GroupNotePane 화면, note-host-note와 동일한 촘촘한 배치 기준) |
+| images/prepared-contact-compose.png | (이전) 조직도 선택 직원 대상 쪽지 작성 도우미. 현재는 통합 쪽지 창(`note-host-note.png`)으로 바뀜 |
+| images/personalized-notes.png | 개인별 쪽지 작성과 미리보기 창 (600×600 Density 기준 화면) |
+| images/personalized-notes-full.png | 개인별 쪽지 전체 작업 카드 (600×1500 전체 구역 펼침 화면) |
 | images/personalized-saved-tags.png | 개인별 쪽지 저장한 작업의 상태 태그 (임시 저장·발송 완료·일부 발송) |
+| images/manage-hotkey.png | 관리(설정) 창의 단축키 설정 화면 (기본 Ctrl+Shift+Space, 실시간 키 조합 확인 및 충돌 방지) |
 
 실제 메인 화면과 합성 상세 패널을 함께 배치한 그림은 한 시점의 실제 부착 상태를 뜻하지 않는다. 미검증 대화 입력 반영 화면을 현재 제품 사용법의 예시로 넣지 않는다.
 
